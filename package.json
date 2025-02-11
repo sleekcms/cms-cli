@@ -1,0 +1,21 @@
+{
+  "name": "@sleekcms/sleekcms-cli",
+  "version": "1.0.0",
+  "description": "SleekCMS CLI for locally editing SleekCMS site template code",
+  "main": "index.js",
+  "bin": {
+    "sleekcms": "index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Yusuf Bhabhrawala",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.7.9",
+    "chokidar": "^4.0.3",
+    "commander": "^13.1.0",
+    "express": "^4.21.2",
+    "fs-extra": "^11.3.0"
+  }
+}
