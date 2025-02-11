@@ -12,9 +12,8 @@ const API_BASE_URLS = {
     production: "https://app.sleekcms.com/api/template",
 }
 
-const VIEWS_DIR = "./views";
 const PORT = 8080;
-const DEBOUNCE_DELAY = 2000; // 2 seconds delay
+const DEBOUNCE_DELAY = 1000; // 2 seconds delay
 let isShuttingDown = false;
 const pendingUpdates = {};
 let fileMap = {};
@@ -36,6 +35,8 @@ if (!AUTH_TOKEN) {
 
 const API_BASE_URL = API_BASE_URLS[ENV] || API_BASE_URLS.production;
 
+const VIEWS_DIR = AUTH_TOKEN.split('-')[0] + "-views/";
+
 // Axios instance with authorization
 const apiClient = axios.create({
     baseURL: API_BASE_URL,
@@ -49,11 +50,11 @@ async function fetchFiles() {
         console.log("📥 Fetching files from API...");
         const response = await apiClient.get("/");
 
-        await fs.ensureDir(VIEWS_DIR);
+        await fs.ensureDir(`./${VIEWS_DIR}`);
 
         for (const file of response.data) {
             if (file.file_path) {
-                const filePath = `${VIEWS_DIR}/${file.file_path}`;
+                const filePath = `./${VIEWS_DIR}${file.file_path}`;
                 await fs.outputFile(filePath, file.code);
                 fileMap[file.file_path] = file.id;
                 console.log(`✅ Created: ${filePath}`);    
@@ -70,7 +71,7 @@ async function fetchFiles() {
 async function cleanupFiles() {
     console.log("🧹 Cleaning up files...");
     try {
-        await fs.remove(VIEWS_DIR);
+        await fs.remove(`./${VIEWS_DIR}`);
         console.log("✅ Cleanup complete. Exiting...");
     } catch (error) {
         console.error("❌ Error during cleanup:", error.message);
@@ -82,7 +83,7 @@ async function cleanupFiles() {
 function scheduleUpdate(filePath) {
     if (isShuttingDown) return;
 
-    const relativePath = filePath.replace("views/", ""); // Extract relative file path
+    const relativePath = filePath.replace(VIEWS_DIR, ""); // Extract relative file path
     const fileId = fileMap[relativePath];
 
     // Clear previous timeout if it exists
@@ -109,7 +110,7 @@ function scheduleUpdate(filePath) {
 function monitorFiles() {
     console.log("👀 Watching for file changes...");
 
-    chokidar.watch(VIEWS_DIR, { persistent: true, ignoreInitial: true })
+    chokidar.watch(`./${VIEWS_DIR}`, { persistent: true, ignoreInitial: true })
         .on("change", scheduleUpdate);
 }
 
