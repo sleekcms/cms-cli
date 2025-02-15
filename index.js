@@ -3,7 +3,6 @@
 const fs = require("fs-extra");
 const axios = require("axios");
 const chokidar = require("chokidar");
-const express = require("express");
 const { program } = require("commander");
 
 const API_BASE_URLS = {
@@ -106,27 +105,23 @@ function scheduleUpdate(filePath) {
     }, DEBOUNCE_DELAY);
 }
 
+async function createSchema(filePath) {
+    if (isShuttingDown) return;
+
+    const relativePath = filePath.replace(VIEWS_DIR, ""); // Extract relative file path
+    const resp = await apiClient.post("/cli", { file_path: relativePath});
+    const schema = resp.data;
+    fileMap[relativePath] = schema.tmpl_main_id;
+    console.log("✅ Created model for:", relativePath);
+}
+
 // Function to monitor file changes
 function monitorFiles() {
     console.log("👀 Watching for file changes...");
 
     chokidar.watch(`./${VIEWS_DIR}`, { persistent: true, ignoreInitial: true })
-        .on("change", scheduleUpdate);
-}
-
-// Function to start the Express server
-function startServer() {
-    const app = express();
-
-    app.get("*", (req, res) => {
-        res.send("Hello World");
-    });
-
-    const server = app.listen(PORT, () => {
-        console.log(`🚀 Server running on http://localhost:${PORT}`);
-    });
-
-    return server;
+        .on("change", scheduleUpdate)
+        .on("add", createSchema);
 }
 
 // Graceful shutdown handler
@@ -145,20 +140,16 @@ async function handleExit() {
 async function main() {
     await fetchFiles();
     monitorFiles();
-    const server = startServer();
+    //const server = startServer();
 
     process.on("SIGINT", async () => {
         console.log("\n🛑 Caught interrupt signal (Ctrl+C)");
-        server.close(async () => {
-            await handleExit();
-        });
+        await handleExit();
     });
 
     process.on("SIGTERM", async () => {
         console.log("\n🛑 Caught termination signal");
-        server.close(async () => {
-            await handleExit();
-        });
+        await handleExit();
     });
 }
 
