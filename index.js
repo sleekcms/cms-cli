@@ -11,11 +11,11 @@ const API_BASE_URLS = {
     production: "https://app.sleekcms.com/api/template",
 }
 
-const PORT = 8080;
 const DEBOUNCE_DELAY = 1000; // 2 seconds delay
 let isShuttingDown = false;
 const pendingUpdates = {};
 let fileMap = {};
+let watcher;
 
 // CLI Setup to take `--token=<token>`
 program
@@ -107,21 +107,41 @@ function scheduleUpdate(filePath) {
 
 async function createSchema(filePath) {
     if (isShuttingDown) return;
-
-    const relativePath = filePath.replace(VIEWS_DIR, ""); // Extract relative file path
-    const resp = await apiClient.post("/cli", { file_path: relativePath});
-    const schema = resp.data;
-    fileMap[relativePath] = schema.tmpl_main_id;
-    console.log("✅ Created model for:", relativePath);
+    try {
+        const relativePath = filePath.replace(VIEWS_DIR, ""); // Extract relative file path
+        const resp = await apiClient.post("/cli", { file_path: relativePath});
+        const schema = resp.data;
+        const templateResp = await apiClient.get(`/${schema.tmpl_main_id}`);
+        const template = templateResp.data;
+        if (relativePath !== template.file_path) {
+            // rename the file
+            const oldPath = filePath;
+            const newPath = `./${VIEWS_DIR}${template.file_path}`;
+            watcher.unwatch(newPath);
+            await fs.move(oldPath, newPath);
+            watcher.add(newPath);
+            console.log(`✅ Renamed file from ${relativePath} to ${template.file_path}`);
+        }
+        fileMap[template.file_path] = schema.tmpl_main_id;
+        console.log("✅ Created model for:", template.file_path);
+    } catch (error) {
+        console.error("❌ Error creating model:", error.response?.data || error.message);
+        // delete the file locally
+        await fs.unlink(filePath);
+    }
 }
 
 // Function to monitor file changes
 function monitorFiles() {
     console.log("👀 Watching for file changes...");
 
-    chokidar.watch(`./${VIEWS_DIR}`, { persistent: true, ignoreInitial: true })
-        .on("change", scheduleUpdate)
-        .on("add", createSchema);
+    watcher = chokidar.watch(`./${VIEWS_DIR}`, { 
+        persistent: true, 
+        ignoreInitial: true,
+        ignored: /\.vscode\//
+    })
+    .on("change", scheduleUpdate)
+    .on("add", createSchema);
 }
 
 // Graceful shutdown handler
