@@ -40,6 +40,8 @@ const VIEWS_DIR = AUTH_TOKEN.split('-')[0] + "-views/";
 const apiClient = axios.create({
     baseURL: API_BASE_URL,
     headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
 });
 
 
@@ -94,9 +96,8 @@ function scheduleUpdate(filePath) {
     pendingUpdates[fileId] = setTimeout(async () => {
         try {
             const code = await fs.readFile(filePath, "utf-8");
-
-            await apiClient.patch(`/${fileId}`, { code });
-            console.log("✅ Updated template for:", relativePath);
+            let template = await apiClient.patch(`/${fileId}`, { code: code || "foo bar" });
+            console.log("✅ Updated template for: ", relativePath, `In: ${code.length}, Out: ${template.data.code.length}`);
 
             delete pendingUpdates[fileId]; // Cleanup
         } catch (error) {
