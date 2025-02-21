@@ -4,6 +4,7 @@ const fs = require("fs-extra");
 const axios = require("axios");
 const chokidar = require("chokidar");
 const { program } = require("commander");
+const path = require("path");
 
 const API_BASE_URLS = {
     localhost: "http://localhost:9000/api/template",
@@ -34,7 +35,7 @@ if (!AUTH_TOKEN) {
 
 const API_BASE_URL = API_BASE_URLS[ENV] || API_BASE_URLS.production;
 
-const VIEWS_DIR = AUTH_TOKEN.split('-')[0] + "-views/";
+const VIEWS_DIR = path.resolve(AUTH_TOKEN.split('-')[0] + "-views");
 
 // Axios instance with authorization
 const apiClient = axios.create({
@@ -51,14 +52,14 @@ async function fetchFiles() {
         console.log("📥 Fetching files from API...");
         const response = await apiClient.get("/");
 
-        await fs.ensureDir(`./${VIEWS_DIR}`);
+        await fs.ensureDir(VIEWS_DIR);
 
         for (const file of response.data) {
             if (file.file_path) {
-                const filePath = `./${VIEWS_DIR}${file.file_path}`;
+                const filePath = path.join(VIEWS_DIR, file.file_path);
                 await fs.outputFile(filePath, file.code);
-                fileMap[file.file_path] = file.id;
-                console.log(`✅ Created: ${filePath}`);    
+                fileMap[file.file_path.replace(/\\/g,"/")] = file.id;
+                console.log(`✅ Created: ${filePath}`);
             }
         }
 
@@ -72,7 +73,7 @@ async function fetchFiles() {
 async function cleanupFiles() {
     console.log("🧹 Cleaning up files...");
     try {
-        await fs.remove(`./${VIEWS_DIR}`);
+        await fs.remove(VIEWS_DIR);
         console.log("✅ Cleanup complete. Exiting...");
     } catch (error) {
         console.error("❌ Error during cleanup:", error.message);
@@ -84,8 +85,13 @@ async function cleanupFiles() {
 function scheduleUpdate(filePath) {
     if (isShuttingDown) return;
 
-    const relativePath = filePath.replace(VIEWS_DIR, ""); // Extract relative file path
+    const relativePath = path.relative(VIEWS_DIR, filePath).replace(/\\/g, "/"); // Extract relative file path
     const fileId = fileMap[relativePath];
+
+    if (!fileId) {
+        console.warn(`⚠️ Skipping update: No matching file found in API for ${relativePath}`);
+        return;
+    }
 
     // Clear previous timeout if it exists
     if (pendingUpdates[fileId]) {
@@ -97,7 +103,7 @@ function scheduleUpdate(filePath) {
         try {
             const code = await fs.readFile(filePath, "utf-8");
             let template = await apiClient.patch(`/${fileId}`, { code: code || "foo bar" });
-            console.log("✅ Updated template for: ", relativePath, `In: ${code.length}, Out: ${template.data.code.length}`);
+            console.log(`✅ Updated template for: ${relativePath} | Length In: ${code.length}, Out: ${template.data.code.length}`);
 
             delete pendingUpdates[fileId]; // Cleanup
         } catch (error) {
@@ -109,7 +115,7 @@ function scheduleUpdate(filePath) {
 async function createSchema(filePath) {
     if (isShuttingDown) return;
     try {
-        const relativePath = filePath.replace(VIEWS_DIR, ""); // Extract relative file path
+        const relativePath = path.relative(VIEWS_DIR, filePath).replace(/\\/g, "/");
         const resp = await apiClient.post("/cli", { file_path: relativePath});
         const schema = resp.data;
         const templateResp = await apiClient.get(`/${schema.tmpl_main_id}`);
@@ -117,13 +123,13 @@ async function createSchema(filePath) {
         if (relativePath !== template.file_path) {
             // rename the file
             const oldPath = filePath;
-            const newPath = `./${VIEWS_DIR}${template.file_path}`;
+            const newPath = path.join(VIEWS_DIR, template.file_path);
             watcher.unwatch(newPath);
             await fs.move(oldPath, newPath);
             watcher.add(newPath);
             console.log(`✅ Renamed file from ${relativePath} to ${template.file_path}`);
         }
-        fileMap[template.file_path] = schema.tmpl_main_id;
+        fileMap[template.file_path.replace(/\\/g, "/")] = schema.tmpl_main_id;
         console.log("✅ Created model for:", template.file_path);
     } catch (error) {
         console.error("❌ Error creating model:", error.response?.data || error.message);
@@ -136,7 +142,7 @@ async function createSchema(filePath) {
 function monitorFiles() {
     console.log("👀 Watching for file changes...");
 
-    watcher = chokidar.watch(`./${VIEWS_DIR}`, { 
+    watcher = chokidar.watch(VIEWS_DIR, { 
         persistent: true, 
         ignoreInitial: true,
         ignored: /\.vscode\//
