@@ -45,6 +45,18 @@ const apiClient = axios.create({
     maxBodyLength: Infinity,
 });
 
+async function refreshFile(filePath) {
+    try {
+        const relativePath = path.relative(VIEWS_DIR, filePath).replace(/\\/g, "/");
+        const resp = await apiClient.get(`/${fileMap[relativePath].id}`);
+        const template = resp.data;
+        fileMap[relativePath] = template;
+        await fs.outputFile(filePath, template.code);
+        console.log(`✅ Refreshed template for: ${relativePath}`);
+    } catch (error) {
+        console.error("❌ Error refreshing template:", error.response?.data || error.message);
+    }
+}
 
 // Function to fetch and save files
 async function fetchFiles() {
@@ -58,7 +70,7 @@ async function fetchFiles() {
             if (file.file_path) {
                 const filePath = path.join(VIEWS_DIR, file.file_path);
                 await fs.outputFile(filePath, file.code);
-                fileMap[file.file_path.replace(/\\/g,"/")] = file.id;
+                fileMap[file.file_path.replace(/\\/g,"/")] = file;
                 console.log(`✅ Created: ${filePath}`);
             }
         }
@@ -86,28 +98,31 @@ function scheduleUpdate(filePath) {
     if (isShuttingDown) return;
 
     const relativePath = path.relative(VIEWS_DIR, filePath).replace(/\\/g, "/"); // Extract relative file path
-    const fileId = fileMap[relativePath];
+    const file = fileMap[relativePath];
 
-    if (!fileId) {
+    if (!file?.id) {
         console.warn(`⚠️ Skipping update: No matching file found in API for ${relativePath}`);
         return;
     }
 
     // Clear previous timeout if it exists
-    if (pendingUpdates[fileId]) {
-        clearTimeout(pendingUpdates[fileId]);
+    if (pendingUpdates[file.id]) {
+        clearTimeout(pendingUpdates[file.id]);
     }
 
     // Schedule a new update after the debounce delay
-    pendingUpdates[fileId] = setTimeout(async () => {
+    pendingUpdates[file.id] = setTimeout(async () => {
         try {
             const code = await fs.readFile(filePath, "utf-8");
-            let template = await apiClient.patch(`/${fileId}`, { code: code || "foo bar" });
+            let template = await apiClient.patch(`/${file.id}`, { code: code || "foo bar", updated_at: file.updated_at });
+            fileMap[relativePath] = template.data;
             console.log(`✅ Updated template for: ${relativePath} | Length In: ${code.length}, Out: ${template.data.code.length}`);
 
-            delete pendingUpdates[fileId]; // Cleanup
+            delete pendingUpdates[file.id]; // Cleanup
         } catch (error) {
             console.error("❌ Error updating API:", error.response?.data || error.message);
+            // refresh file
+            await refreshFile(filePath);
         }
     }, DEBOUNCE_DELAY);
 }
@@ -129,7 +144,7 @@ async function createSchema(filePath) {
             watcher.add(newPath);
             console.log(`✅ Renamed file from ${relativePath} to ${template.file_path}`);
         }
-        fileMap[template.file_path.replace(/\\/g, "/")] = schema.tmpl_main_id;
+        fileMap[template.file_path.replace(/\\/g, "/")] = template;
         console.log("✅ Created model for:", template.file_path);
     } catch (error) {
         console.error("❌ Error creating model:", error.response?.data || error.message);
