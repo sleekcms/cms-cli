@@ -137,7 +137,7 @@ function scheduleUpdate(filePath) {
             const code = await fs.readFile(filePath, "utf-8");
             let template = await apiClient.patch(`/${file.id}`, { code: code || "foo bar", updated_at: file.updated_at });
             fileMap[relativePath] = template.data;
-            console.log(`✅ Updated template for: ${relativePath} | Length In: ${code.length}, Out: ${template.data.code.length}`);
+            console.log(`✅ Updated template for: ${relativePath}`);
 
             delete pendingUpdates[file.id]; // Cleanup
         } catch (error) {
