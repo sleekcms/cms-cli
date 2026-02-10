@@ -5,6 +5,10 @@ const axios = require("axios");
 const chokidar = require("chokidar");
 const { program } = require("commander");
 const path = require("path");
+const express = require("express");
+const { execSync, spawn } = require("child_process");
+const readline = require("readline");
+const agentMdContent = require("./agent.js");
 
 const API_BASE_URLS = {
     localhost: "http://localhost:9000/api/template",
@@ -20,22 +24,36 @@ let watcher;
 
 // CLI Setup to take `--token=<token>`
 program
-    .option("--token <token>", "API authentication token")
-    .option("--env <env>", "Environment (localhost, development, production)", "production")
+    .name("cms-cli")
+    .description("SleekCMS CLI tool to sync and edit CMS templates locally. Downloads templates, watches for changes, and syncs updates back to the API.")
+    .version("1.0.0", "-v, --version", "output the version number")
+    .option("-t, --token <token>", "API authentication token (required)")
+    .option("-e, --env <env>", "Environment (localhost, development, production)", "production")
+    .option("-p, --path <path>", "Directory path for files (default: <token-prefix>-views)")
+    .addHelpText("after", `
+Examples:
+  $ cms-cli --token abc123-xxxx
+  $ cms-cli -t abc123-xxxx -e development
+  $ cms-cli -t abc123-xxxx -p ./my-templates
+`)
     .parse(process.argv);
 
 const options = program.opts();
 const AUTH_TOKEN = options.token;
-const ENV = options.env.toLowerCase();
+const tokenParts = AUTH_TOKEN ? AUTH_TOKEN.split('-') : [];
+const ENV = (tokenParts[2] || options.env || "production").toLowerCase();
 
 if (!AUTH_TOKEN) {
-    console.error("❌ Missing required --token parameter.");
+    console.error("❌ Missing required --token (-t) parameter. Use -h for help.");
     process.exit(1);
 }
 
 const API_BASE_URL = API_BASE_URLS[ENV] || API_BASE_URLS.production;
 
-const VIEWS_DIR = path.resolve(AUTH_TOKEN.split('-')[0] + "-views");
+const viewsFolder = tokenParts[0] + "-views";
+const VIEWS_DIR = options.path 
+    ? path.resolve(options.path, viewsFolder) 
+    : path.resolve(viewsFolder);
 
 // Axios instance with authorization
 const apiClient = axios.create({
@@ -61,7 +79,7 @@ async function refreshFile(filePath) {
 // Function to fetch and save files
 async function fetchFiles() {
     try {
-        console.log("📥 Fetching files from API...");
+        console.log("📥 Fetching source code...");
         const response = await apiClient.get("/");
 
         await fs.ensureDir(VIEWS_DIR);
@@ -71,11 +89,14 @@ async function fetchFiles() {
                 const filePath = path.join(VIEWS_DIR, file.file_path);
                 await fs.outputFile(filePath, file.code);
                 fileMap[file.file_path.replace(/\\/g,"/")] = file;
-                console.log(`✅ Created: ${filePath}`);
+                //console.log(`✅ Created: ${filePath}`);
             }
         }
 
-        console.log("✔️ All files downloaded. They will be deleted on exit.");
+        console.log(`✔️ Downloaded ${response.data.length} template(s).`);
+        
+        // Create AGENT.md
+        await fs.outputFile(path.join(VIEWS_DIR, 'AGENT.md'), agentMdContent);
     } catch (error) {
         console.error("❌ Error fetching files:", error.response?.data || error.message);
     }
@@ -153,17 +174,99 @@ async function createSchema(filePath) {
     }
 }
 
+// Start an Express server to serve files in VIEWS_DIR
+function startServer() {
+    const app = express();
+
+    // Serve static files from VIEWS_DIR
+    app.use(express.static(VIEWS_DIR));
+
+    // Optional: Custom 404 for files not found
+    app.use((req, res) => {
+        res.status(404).send("File not found");
+    });
+
+    const port = process.env.PORT || 3000;
+    app.listen(port, () => {
+        console.log(`\n✅ Ready! Editing session started.`);
+        console.log(`\n📁 Templates directory: ${VIEWS_DIR}`);
+        console.log(`🌐 Environment: ${ENV}`);
+        console.log(`🔗 Static server: http://localhost:${port}`);
+        console.log(`\n⚠️  Files will be cleaned up on exit (Ctrl+C).`);
+        showEditorMenu();
+    });
+}
+
 // Function to monitor file changes
 function monitorFiles() {
-    console.log("👀 Watching for file changes...");
-
     watcher = chokidar.watch(VIEWS_DIR, { 
         persistent: true, 
         ignoreInitial: true,
-        ignored: /\.vscode\//
+        ignored: [/\.vscode\//, /AGENT\.md$/]
     })
     .on("change", scheduleUpdate)
     .on("add", createSchema);
+}
+
+// Check if a command exists in PATH
+function commandExists(cmd) {
+    try {
+        execSync(`which ${cmd}`, { stdio: 'ignore' });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+// Show editor selection menu
+function showEditorMenu() {
+    const editors = [];
+    
+    if (commandExists('code')) {
+        editors.push({ key: '1', name: 'VS Code', cmd: 'code' });
+    }
+    if (commandExists('cursor')) {
+        editors.push({ key: '2', name: 'Cursor', cmd: 'cursor' });
+    }
+    
+    if (editors.length === 0) {
+        console.log('\n👀 Watching for changes...\n');
+        return;
+    }
+    
+    console.log('\n📂 Open in editor:');
+    editors.forEach(e => console.log(`   [${e.key}] ${e.name}`));
+    console.log('   [Enter] Skip\n');
+    
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+    
+    // Count lines to clear (menu header + editors + skip + empty + prompt)
+    const linesToClear = editors.length + 4;
+    
+    rl.question('Select editor: ', (answer) => {
+        rl.close();
+        
+        // Clear the menu lines
+        process.stdout.write(`\x1b[${linesToClear}A`); // Move cursor up
+        for (let i = 0; i < linesToClear; i++) {
+            process.stdout.write('\x1b[2K\n'); // Clear each line
+        }
+        process.stdout.write(`\x1b[${linesToClear}A`); // Move back up
+        
+        const selected = editors.find(e => e.key === answer.trim());
+        if (selected) {
+            console.log(`👀 Watching for changes... (opened ${selected.name})\n`);
+            spawn(selected.cmd, [VIEWS_DIR], { 
+                detached: true, 
+                stdio: 'ignore' 
+            }).unref();
+        } else {
+            console.log('👀 Watching for changes...\n');
+        }
+    });
 }
 
 // Graceful shutdown handler
@@ -182,7 +285,7 @@ async function handleExit() {
 async function main() {
     await fetchFiles();
     monitorFiles();
-    //const server = startServer();
+    startServer();
 
     process.on("SIGINT", async () => {
         console.log("\n🛑 Caught interrupt signal (Ctrl+C)");
