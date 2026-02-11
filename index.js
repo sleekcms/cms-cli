@@ -135,6 +135,13 @@ function scheduleUpdate(filePath) {
     pendingUpdates[file.id] = setTimeout(async () => {
         try {
             const code = await fs.readFile(filePath, "utf-8");
+
+            // Skip API call if content hasn't changed
+            if (code === file.code) {
+                delete pendingUpdates[file.id];
+                return;
+            }
+
             let template = await apiClient.patch(`/${file.id}`, { code: code || "foo bar", updated_at: file.updated_at });
             fileMap[relativePath] = template.data;
             console.log(`✅ Updated template for: ${relativePath}`);
