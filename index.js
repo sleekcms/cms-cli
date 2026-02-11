@@ -5,7 +5,6 @@ const axios = require("axios");
 const chokidar = require("chokidar");
 const { program } = require("commander");
 const path = require("path");
-const express = require("express");
 const { execSync, spawn } = require("child_process");
 const readline = require("readline");
 const agentMdContent = require("./agent.js");
@@ -39,29 +38,58 @@ Examples:
     .parse(process.argv);
 
 const options = program.opts();
-const AUTH_TOKEN = options.token;
-const tokenParts = AUTH_TOKEN ? AUTH_TOKEN.split('-') : [];
-const ENV = (tokenParts[2] || options.env || "production").toLowerCase();
 
-if (!AUTH_TOKEN) {
-    console.error("❌ Missing required --token (-t) parameter. Use -h for help.");
-    process.exit(1);
+// Will be set after prompting if needed
+let AUTH_TOKEN;
+let ENV;
+let API_BASE_URL;
+let VIEWS_DIR;
+let apiClient;
+
+function prompt(question) {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+    return new Promise(resolve => {
+        rl.question(question, answer => {
+            rl.close();
+            resolve(answer.trim());
+        });
+    });
 }
 
-const API_BASE_URL = API_BASE_URLS[ENV] || API_BASE_URLS.production;
+async function initConfig() {
+    AUTH_TOKEN = options.token;
+    if (!AUTH_TOKEN) {
+        AUTH_TOKEN = await prompt("Enter SleekCMS CLI auth token: ");
+        if (!AUTH_TOKEN) {
+            console.error("❌ Token is required.");
+            process.exit(1);
+        }
+    }
 
-const viewsFolder = tokenParts[0] + "-views";
-const VIEWS_DIR = options.path 
-    ? path.resolve(options.path, viewsFolder) 
-    : path.resolve(viewsFolder);
+    const tokenParts = AUTH_TOKEN.trim().split('-');
+    ENV = (tokenParts[2] || options.env || "production").toLowerCase();
+    API_BASE_URL = API_BASE_URLS[ENV] || API_BASE_URLS.production;
 
-// Axios instance with authorization
-const apiClient = axios.create({
-    baseURL: API_BASE_URL,
-    headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
-    maxContentLength: Infinity,
-    maxBodyLength: Infinity,
-});
+    let customPath = options.path;
+    if (!customPath) {
+        customPath = await prompt("Enter workspace folder path (or press Enter for current directory): ");
+    }
+
+    const viewsFolder = tokenParts[0] + "-views";
+    VIEWS_DIR = customPath 
+        ? path.resolve(customPath, viewsFolder) 
+        : path.resolve(viewsFolder);
+
+    apiClient = axios.create({
+        baseURL: API_BASE_URL,
+        headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+    });
+}
 
 async function refreshFile(filePath) {
     try {
@@ -181,29 +209,6 @@ async function createSchema(filePath) {
     }
 }
 
-// Start an Express server to serve files in VIEWS_DIR
-function startServer() {
-    const app = express();
-
-    // Serve static files from VIEWS_DIR
-    app.use(express.static(VIEWS_DIR));
-
-    // Optional: Custom 404 for files not found
-    app.use((req, res) => {
-        res.status(404).send("File not found");
-    });
-
-    const port = process.env.PORT || 3000;
-    app.listen(port, () => {
-        console.log(`\n✅ Ready! Editing session started.`);
-        console.log(`\n📁 Templates directory: ${VIEWS_DIR}`);
-        console.log(`🌐 Environment: ${ENV}`);
-        console.log(`🔗 Static server: http://localhost:${port}`);
-        console.log(`\n⚠️  Files will be cleaned up on exit (Ctrl+C).`);
-        showEditorMenu();
-    });
-}
-
 // Function to monitor file changes
 function monitorFiles() {
     watcher = chokidar.watch(VIEWS_DIR, { 
@@ -290,9 +295,15 @@ async function handleExit() {
 
 // Main function
 async function main() {
+    await initConfig();
     await fetchFiles();
     monitorFiles();
-    startServer();
+    
+    console.log(`\n✅ Ready! Editing session started.`);
+    console.log(`\n📁 Templates directory: ${VIEWS_DIR}`);
+    console.log(`🌐 Environment: ${ENV}`);
+    console.log(`\n⚠️  Files will be cleaned up on exit (Ctrl+C).`);
+    showEditorMenu();
 
     process.on("SIGINT", async () => {
         console.log("\n🛑 Caught interrupt signal (Ctrl+C)");
