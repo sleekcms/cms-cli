@@ -9,6 +9,8 @@ const { execSync, spawn } = require("child_process");
 const readline = require("readline");
 const agentMdContent = require("./agent.js");
 
+const kebabCase = (str) => str.replace(/[\s_]+/g, "-").toLowerCase();
+
 const API_BASE_URLS = {
     localhost: "http://localhost:9000/api/template",
     development: "https://app.sleekcms.net/api/template",
@@ -45,6 +47,7 @@ let ENV;
 let API_BASE_URL;
 let VIEWS_DIR;
 let apiClient;
+let site = null;
 
 function prompt(question) {
     const rl = readline.createInterface({
@@ -78,17 +81,21 @@ async function initConfig() {
         customPath = await prompt("Enter workspace folder path (or press Enter for current directory): ");
     }
 
-    const viewsFolder = tokenParts[0] + "-views";
+    apiClient = axios.create({
+      baseURL: API_BASE_URL,
+      headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+    });
+
+    site = await apiClient.get("/site");
+
+    const viewsFolder = kebabCase(`${site.data.name.substr(0,20)} ${site.data.id}`);
+
     VIEWS_DIR = customPath 
         ? path.resolve(customPath, viewsFolder) 
         : path.resolve(viewsFolder);
 
-    apiClient = axios.create({
-        baseURL: API_BASE_URL,
-        headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-    });
 }
 
 async function refreshFile(filePath) {
@@ -121,7 +128,7 @@ async function fetchFiles() {
             }
         }
 
-        console.log(`✔️ Downloaded ${response.data.length} template(s).`);
+        console.log(`✔️ Downloaded ${response.data.length} file(s).`);
         
         // Create AGENT.md
         await fs.outputFile(path.join(VIEWS_DIR, 'AGENT.md'), agentMdContent);
@@ -135,7 +142,7 @@ async function cleanupFiles() {
     console.log("🧹 Cleaning up files...");
     try {
         await fs.remove(VIEWS_DIR);
-        console.log("✅ Cleanup complete. Exiting...");
+        console.log(`✅ Cleanup complete. Deleted workspace at ${VIEWS_DIR} .`);
     } catch (error) {
         console.error("❌ Error during cleanup:", error.message);
     }
@@ -248,17 +255,18 @@ function showEditorMenu() {
     
     console.log('\n📂 Open in editor:');
     editors.forEach(e => console.log(`   [${e.key}] ${e.name}`));
-    console.log('   [Enter] Skip\n');
+    console.log('   [Enter] Skip');
+    console.log('   [x] Quit\n');
     
     const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout
     });
     
-    // Count lines to clear (menu header + editors + skip + empty + prompt)
-    const linesToClear = editors.length + 4;
+    // Count lines to clear (menu header + editors + skip + quit + empty + prompt)
+    const linesToClear = editors.length + 5;
     
-    rl.question('Select editor: ', (answer) => {
+    rl.question('Select editor: ', async (answer) => {
         rl.close();
         
         // Clear the menu lines
@@ -267,6 +275,11 @@ function showEditorMenu() {
             process.stdout.write('\x1b[2K\n'); // Clear each line
         }
         process.stdout.write(`\x1b[${linesToClear}A`); // Move back up
+        
+        if (answer.trim().toLowerCase() === 'x') {
+            await handleExit();
+            return;
+        }
         
         const selected = editors.find(e => e.key === answer.trim());
         if (selected) {
@@ -299,9 +312,9 @@ async function main() {
     await fetchFiles();
     monitorFiles();
     
-    console.log(`\n✅ Ready! Editing session started.`);
-    console.log(`\n📁 Templates directory: ${VIEWS_DIR}`);
-    console.log(`🌐 Environment: ${ENV}`);
+    console.log(`\n✅ Ready! Editing session started for site - ${site.data.name}.`);
+    console.log(`\n📁 Workspace created at: ${VIEWS_DIR}`);
+    if (ENV !== 'production') console.log(`🌐 Environment: ${ENV}`);
     console.log(`\n⚠️  Files will be cleaned up on exit (Ctrl+C).`);
     showEditorMenu();
 

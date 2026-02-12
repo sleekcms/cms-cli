@@ -1,6 +1,6 @@
 {
   "name": "@sleekcms/cli",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "SleekCMS CLI for locally editing SleekCMS site template code",
   "main": "index.js",
   "bin": {
