@@ -80,6 +80,9 @@ async function initConfig() {
     if (!customPath) {
         customPath = await prompt("Enter workspace folder path (or press Enter for current directory): ");
     }
+    if (customPath && customPath.startsWith("~")) {
+        customPath = path.join(require("os").homedir(), customPath.slice(1));
+    }
 
     apiClient = axios.create({
       baseURL: API_BASE_URL,
