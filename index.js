@@ -22,6 +22,8 @@ let isShuttingDown = false;
 const pendingUpdates = {};
 let fileMap = {};
 let watcher;
+const addQueue = [];
+let processingAdd = false;
 
 // CLI Setup to take `--token=<token>`
 program
@@ -132,6 +134,17 @@ async function fetchFiles() {
         }
 
         console.log(`✔️ Downloaded ${response.data.length} file(s).`);
+
+        // Fetch and save TypeScript types
+        try {
+            const typesResponse = await apiClient.get("/types");
+            const sleekcmsDir = path.join(VIEWS_DIR, '.sleekcms');
+            await fs.ensureDir(sleekcmsDir);
+            await fs.outputFile(path.join(sleekcmsDir, 'types.ts'), typesResponse.data.typescript);
+            console.log(`✔️ Downloaded types.ts`);
+        } catch (typesError) {
+            console.warn("⚠️ Could not fetch types:", typesError.response?.data || typesError.message);
+        }
         
         // Create AGENT.md
         await fs.outputFile(path.join(VIEWS_DIR, 'AGENT.md'), agentMdContent);
@@ -157,6 +170,7 @@ function scheduleUpdate(filePath) {
     if (isShuttingDown) return;
 
     const relativePath = path.relative(VIEWS_DIR, filePath).replace(/\\/g, "/"); // Extract relative file path
+    if (ignoredFiles.has(relativePath)) return;
     const file = fileMap[relativePath];
 
     if (!file?.id) {
@@ -193,17 +207,21 @@ function scheduleUpdate(filePath) {
     }, DEBOUNCE_DELAY);
 }
 
-async function createSchema(filePath) {
+async function createSchema(relativePath) {
     if (isShuttingDown) return;
     try {
-        const relativePath = path.relative(VIEWS_DIR, filePath).replace(/\\/g, "/");
         const resp = await apiClient.post("/cli", { file_path: relativePath});
-        const schema = resp.data;
-        const templateResp = await apiClient.get(`/${schema.tmpl_main_id}`);
-        const template = templateResp.data;
+        let template;
+        if (relativePath.startsWith("js") || relativePath.startsWith("css")) {
+            template = resp.data;
+        } else {
+            const schema = resp.data;
+            const templateResp = await apiClient.get(`/${schema.tmpl_main_id}`);
+            template = templateResp.data;    
+        }
         if (relativePath !== template.file_path) {
             // rename the file
-            const oldPath = filePath;
+            const oldPath = path.join(VIEWS_DIR, relativePath);
             const newPath = path.join(VIEWS_DIR, template.file_path);
             watcher.unwatch(newPath);
             await fs.move(oldPath, newPath);
@@ -211,12 +229,46 @@ async function createSchema(filePath) {
             console.log(`✅ Renamed file from ${relativePath} to ${template.file_path}`);
         }
         fileMap[template.file_path.replace(/\\/g, "/")] = template;
-        console.log("✅ Created model for:", template.file_path);
+        scheduleUpdate(path.join(VIEWS_DIR, template.file_path));
+        console.log("✅ Synced:", template.file_path);
     } catch (error) {
-        console.error("❌ Error creating model:", error.response?.data || error.message);
+        console.error(`❌ Error creating model (${relativePath}):`, error.response?.data || error.message);
         // delete the file locally
-        await fs.unlink(filePath);
+        await fs.unlink(path.join(VIEWS_DIR, relativePath));
     }
+}
+
+const ignoredFiles = new Set();
+
+async function processAddQueue() {
+    if (processingAdd) return;
+    processingAdd = true;
+    while (addQueue.length > 0) {
+        const filePath = addQueue.shift();
+        const relativePath = path.relative(VIEWS_DIR, filePath).replace(/\\/g, "/");
+        if (!await fs.pathExists(filePath)) {
+            ignoredFiles.delete(relativePath);
+            continue;
+        }
+        const answer = await prompt(`New file detected: ${relativePath}. Create model? (y)es / (n)o / (i)gnore: `);
+        if (!await fs.pathExists(filePath)) {
+            ignoredFiles.delete(relativePath);
+            console.log(`⏭️  Skipped: ${relativePath} (file was deleted)`);
+            continue;
+        }
+        const choice = answer.toLowerCase();
+        if (choice === 'y') {
+            ignoredFiles.delete(relativePath);
+            await createSchema(relativePath);
+        } else if (choice === 'i') {
+            console.log(`🙈 Ignored: ${relativePath} (kept locally, not synced)`);
+        } else {
+            ignoredFiles.delete(relativePath);
+            await fs.unlink(path.join(VIEWS_DIR, relativePath));
+            console.log(`🗑️  Removed: ${relativePath}`);
+        }
+    }
+    processingAdd = false;
 }
 
 // Function to monitor file changes
@@ -224,10 +276,22 @@ function monitorFiles() {
     watcher = chokidar.watch(VIEWS_DIR, { 
         persistent: true, 
         ignoreInitial: true,
-        ignored: [/\.vscode\//, /AGENT\.md$/]
+        ignored: [/\.vscode\//, /AGENT\.md$/, /\.sleekcms\//]
     })
     .on("change", scheduleUpdate)
-    .on("add", createSchema);
+    .on("add", (filePath) => {
+        const relativePath = path.relative(VIEWS_DIR, filePath).replace(/\\/g, "/");
+        if (ignoredFiles.has(relativePath)) return;
+        ignoredFiles.add(relativePath);
+        addQueue.push(filePath);
+        processAddQueue();
+    })
+    .on("unlink", (filePath) => {
+        const relativePath = path.relative(VIEWS_DIR, filePath).replace(/\\/g, "/");
+        ignoredFiles.delete(relativePath);
+        const idx = addQueue.indexOf(filePath);
+        if (idx !== -1) addQueue.splice(idx, 1);
+    });
 }
 
 // Check if a command exists in PATH

@@ -22,8 +22,19 @@ Templates use [EJS](https://ejs.co/) syntax. The template receives a context obj
 - views/entries/*.ejs - ejs template corresponding to each entry. Entries are regular records and can be referenced by other models
 - views/pages/*.ejs - ejs template corresponding to each page or page collections (path/[slug])
 - All _index.ejs are for collection of pages and created for each [slug]
+- .sleekcms/types.ts - TypeScript type definitions for all available data models
 
 **Note:** Do not create any new files. You can suggest creating new models or ask for model schema but don't add any new files.
+
+## TypeScript Types
+
+The `.sleekcms/types.ts` file contains TypeScript type definitions for all content models in this workspace. **Always read this file first** to understand the exact structure of:
+- Page types and their fields
+- Entry types and their fields  
+- Block types and their fields
+- Available images, options, and other data
+
+Use these types to ensure you're accessing the correct field names and understanding the data structure when creating or editing templates.
 
 ## Available Data
 
