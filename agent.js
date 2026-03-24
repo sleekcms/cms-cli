@@ -28,7 +28,7 @@ Templates use [EJS](https://ejs.co/) syntax. The template receives a context obj
 
 ## TypeScript Types
 
-The `.sleekcms/types.ts` file contains TypeScript type definitions for all content models in this workspace. **Always read this file first** to understand the exact structure of:
+The \`.sleekcms/types.ts\` file contains TypeScript type definitions for all content models in this workspace. **Always read this file first** to understand the exact structure of:
 - Page types and their fields
 - Entry types and their fields  
 - Block types and their fields
