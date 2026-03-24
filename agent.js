@@ -107,7 +107,7 @@ Call these to add elements to \`<head>\`. Deduplicated automatically.
 
 ### List pages
 \`\`\`ejs
-<% for (let page of findPages('/blog')) { %>
+<% for (let page of getPages('/blog', {collection: true})) { %>
   <a href="<%= path(page) %>"><%= page.title %></a>
 <% } %>
 \`\`\`

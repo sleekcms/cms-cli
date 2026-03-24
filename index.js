@@ -50,8 +50,22 @@ let API_BASE_URL;
 let VIEWS_DIR;
 let apiClient;
 let site = null;
+let rawModeEnabled = false;
+
+function suspendRawMode() {
+    if (process.stdin.isTTY && rawModeEnabled) {
+        process.stdin.setRawMode(false);
+    }
+}
+
+function resumeRawMode() {
+    if (process.stdin.isTTY && rawModeEnabled) {
+        process.stdin.setRawMode(true);
+    }
+}
 
 function prompt(question) {
+    suspendRawMode();
     const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout
@@ -59,6 +73,7 @@ function prompt(question) {
     return new Promise(resolve => {
         rl.question(question, answer => {
             rl.close();
+            resumeRawMode();
             resolve(answer.trim());
         });
     });
@@ -282,6 +297,8 @@ function monitorFiles() {
     .on("add", (filePath) => {
         const relativePath = path.relative(VIEWS_DIR, filePath).replace(/\\/g, "/");
         if (ignoredFiles.has(relativePath)) return;
+        // Skip files that are already tracked (e.g., from fetchFiles)
+        if (fileMap[relativePath]) return;
         ignoredFiles.add(relativePath);
         addQueue.push(filePath);
         processAddQueue();
@@ -316,7 +333,9 @@ function showEditorMenu() {
     }
     
     if (editors.length === 0) {
-        console.log('\n👀 Watching for changes...\n');
+        console.log('\n👀 Watching for changes...');
+        showWatchHelp();
+        setupKeyboardInput();
         return;
     }
     
@@ -350,14 +369,17 @@ function showEditorMenu() {
         
         const selected = editors.find(e => e.key === answer.trim());
         if (selected) {
-            console.log(`👀 Watching for changes... (opened ${selected.name})\n`);
+            console.log(`👀 Watching for changes... (opened ${selected.name})`);
             spawn(selected.cmd, [VIEWS_DIR], { 
                 detached: true, 
                 stdio: 'ignore' 
             }).unref();
         } else {
-            console.log('👀 Watching for changes...\n');
+            console.log('👀 Watching for changes...');
         }
+        
+        showWatchHelp();
+        setupKeyboardInput();
     });
 }
 
@@ -371,6 +393,39 @@ async function handleExit() {
     await cleanupFiles();
 
     process.exit(0);
+}
+
+// Display watch mode help
+function showWatchHelp() {
+    console.log('📋 Commands: [r] Re-fetch all files  [x] Exit\n');
+}
+
+// Set up keyboard input handling for watch mode
+function setupKeyboardInput() {
+    if (process.stdin.isTTY) {
+        process.stdin.setRawMode(true);
+        rawModeEnabled = true;
+    }
+    process.stdin.resume();
+    process.stdin.setEncoding('utf8');
+    
+    process.stdin.on('data', async (key) => {
+        // Handle Ctrl+C
+        if (key === '\u0003') {
+            await handleExit();
+            return;
+        }
+        
+        const cmd = key.toLowerCase();
+        if (cmd === 'r') {
+            console.log('\n🔄 Re-fetching all files...');
+            await fetchFiles();
+            console.log('👀 Watching for changes...');
+            showWatchHelp();
+        } else if (cmd === 'x') {
+            await handleExit();
+        }
+    });
 }
 
 // Main function
