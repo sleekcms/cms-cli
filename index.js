@@ -7,7 +7,7 @@ const { program } = require("commander");
 const path = require("path");
 const { execSync, spawn } = require("child_process");
 const readline = require("readline");
-const agentMdContent = require("./agent.js");
+const agentMdContent = fs.readFileSync(path.join(__dirname, "Agent.md"), "utf-8");
 
 const kebabCase = (str) => str.replace(/[\s_]+/g, "-").toLowerCase();
 
@@ -139,12 +139,31 @@ async function fetchFiles() {
 
         await fs.ensureDir(VIEWS_DIR);
 
+        // Track old files to detect deletions
+        const oldFilePaths = new Set(Object.keys(fileMap));
+        const newFilePaths = new Set();
+
         for (const file of response.data) {
             if (file.file_path) {
                 const filePath = path.join(VIEWS_DIR, file.file_path);
                 await fs.outputFile(filePath, file.code);
-                fileMap[file.file_path.replace(/\\/g,"/")] = file;
-                //console.log(`✅ Created: ${filePath}`);
+                const normalizedPath = file.file_path.replace(/\\/g, "/");
+                fileMap[normalizedPath] = file;
+                newFilePaths.add(normalizedPath);
+            }
+        }
+
+        // Remove files that no longer exist on the server
+        for (const oldPath of oldFilePaths) {
+            if (!newFilePaths.has(oldPath)) {
+                const filePath = path.join(VIEWS_DIR, oldPath);
+                try {
+                    await fs.unlink(filePath);
+                    delete fileMap[oldPath];
+                    console.log(`🗑️  Removed (deleted on server): ${oldPath}`);
+                } catch (err) {
+                    // File may already be gone locally
+                }
             }
         }
 
