@@ -108,8 +108,13 @@ async function initConfig() {
       maxContentLength: Infinity,
       maxBodyLength: Infinity,
     });
-
-    site = await apiClient.get("/site");
+    try {
+        site = await apiClient.get("/site");
+    } catch (error) {
+        console.error("❌ Error fetching site info. Please check your token and network connection.");
+        console.error(error.response?.data || error.message);
+        process.exit(1);
+    }
 
     const viewsFolder = kebabCase(`${site.data.name.substr(0,20)} ${site.data.id}`);
 
