@@ -61,6 +61,7 @@ function suspendRawMode() {
 function resumeRawMode() {
     if (process.stdin.isTTY && rawModeEnabled) {
         process.stdin.setRawMode(true);
+        process.stdin.resume();
     }
 }
 
