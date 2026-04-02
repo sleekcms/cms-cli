@@ -192,8 +192,10 @@ async function fetchFiles() {
             console.warn("⚠️ Could not fetch types:", typesError.response?.data || typesError.message);
         }
         
-        // Create AGENT.md
+        // Copy Agent.md to known agent instruction locations
         await fs.outputFile(path.join(VIEWS_DIR, 'AGENT.md'), agentMdContent);
+        await fs.outputFile(path.join(VIEWS_DIR, 'CLAUDE.md'), agentMdContent);
+        await fs.outputFile(path.join(VIEWS_DIR, '.vscode', 'copilot-instructions.md'), agentMdContent);
     } catch (error) {
         console.error("❌ Error fetching files:", error.response?.data || error.message);
     }
