@@ -13,7 +13,7 @@ const kebabCase = (str) => str.replace(/[\s_]+/g, "-").toLowerCase();
 
 const API_BASE_URLS = {
     localhost: "http://localhost:9000/api/template",
-    development: "https://app.sleekcms.net/api/template",
+    development: "https://app.sleekcms.dev/api/template",
     production: "https://app.sleekcms.com/api/template",
 }
 
