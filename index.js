@@ -3,7 +3,7 @@
 const fs = require("fs-extra");
 const axios = require("axios");
 const chokidar = require("chokidar");
-const { program } = require("commander");
+const { program, Option } = require("commander");
 const path = require("path");
 const { execSync, spawn } = require("child_process");
 const readline = require("readline");
@@ -29,9 +29,9 @@ let processingAdd = false;
 program
     .name("cms-cli")
     .description("SleekCMS CLI tool to sync and edit CMS templates locally. Downloads templates, watches for changes, and syncs updates back to the API.")
-    .version("1.0.0", "-v, --version", "output the version number")
+    .addOption(new Option("-v, --version", "output the version number").hideHelp())
     .option("-t, --token <token>", "API authentication token (required)")
-    .option("-e, --env <env>", "Environment (localhost, development, production)", "production")
+    .addOption(new Option("-e, --env <env>", "Environment (localhost, development, production)").default("production").hideHelp())
     .option("-p, --path <path>", "Directory path for files (default: <token-prefix>-views)")
     .addHelpText("after", `
 Examples:
@@ -42,6 +42,12 @@ Examples:
     .parse(process.argv);
 
 const options = program.opts();
+
+if (options.version) {
+    const { version } = require("./package.json");
+    console.log(version);
+    process.exit(0);
+}
 
 // Will be set after prompting if needed
 let AUTH_TOKEN;
