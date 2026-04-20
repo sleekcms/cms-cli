@@ -1,223 +1,321 @@
-## SleekCMS Template Architecture & Compilation
+# SleekCMS — Site Builder Reference
 
-### Overview
-
-SleekCMS compiles **content + EJS templates** to **static HTML**. There is no build server, no CI pipeline, no `package.json`, and no Git repository involved.
+Cloud-based headless CMS with an integrated static site builder. Files sync automatically — every save triggers a rebuild and deploy. No Git, no servers, no manual builds.
 
 ---
 
-### The Three Layers
-```
-Content (Models + Records)
-        ↓
-Templates (EJS bound to models)
-        ↓
-Static Site (HTML + CSS + JS + Assets)
-        ↓
-Preview / Deploy
-```
+## How It Works
 
-**Content** — Structured records created from Page Models, Entry Models, and Block Models. The full site content is available as a single JSON payload during compilation.
+Each page = **model** (schema) + **template** (EJS) + optional **layout** (EJS wrapper).
 
-**Templates** — EJS files bound to each model. Every model type (page, entry, block) has its own template. Pages also share an optional Layout template for the outer HTML shell (`<html>`, `<head>`, nav, footer).
-
-**Output** — One HTML file per page record. Static pages produce a single file (`about/index.html`). Page collections produce one file per slug (`blog/hello-world/index.html`).
+The **file name** (key) links a model to its template and determines the URL path.
 
 ---
 
-### Template Hierarchy
-```
-Layout Template          ← shared outer shell (html, head, nav, footer)
-└── Page Template        ← renders fixed page fields + dynamic sections
-    └── render(item.sections)
-        ├── hero.ejs     ← item = hero block's field data
-        ├── features.ejs ← item = features block's field data
-        └── cta.ejs      ← item = cta block's field data
-```
+## File Naming Convention
 
-- **Layout template** — Wraps every page. One layout can serve the whole site.
-- **Page template** — Renders the page's own fields. Calls `render(item.sections)` to delegate dynamic block sections.
-- **Block templates** — Each block model has its own EJS template. The `render()` function iterates the sections array, matches each block instance to its template, and injects the HTML output.
-- **Entry templates** — Optional. Used when an entry renders as a reusable fragment (e.g., an author bio component).
+Keys are lowercase, dash-separated. For pages, `_` in the key maps to `/` in the URL. A `[]` suffix marks a collection.
+
+| File key | URL |
+|---|---|
+| `_index` | `/` (home) |
+| `about` | `/about` |
+| `blog[]` | `/blog/<slug>` (one page per entry) |
+| `docs_getting-started` | `/docs/getting-started` |
 
 ---
 
-### Key Template Variables
+## Folder Structure
 
-| Variable | Available in | Contains |
+```
+/models/pages/<key>.model      Page content models
+/models/entries/<key>.model    Entry content models
+/models/blocks/<key>.model     Block content models
+
+/pages/<key>.ejs               Page templates
+/entries/<key>.ejs             Entry templates
+/blocks/<key>.ejs              Block templates
+/layouts/<name>.ejs            Layout wrappers
+
+/css/<name>.css                Stylesheets (require head injection)
+/css/tailwind.css              Tailwind CSS (auto-compiled, auto-injected)
+/js/<name>.js                  Scripts (require head injection)
+```
+
+> **Tailwind**: Creating `/css/tailwind.css` enables Tailwind. It is compiled and injected automatically — do NOT add it via `link()`.
+> All other CSS/JS files must be included via `link()` or `script()`.
+
+---
+
+## Content Models
+
+### Model Types
+
+| Type | Purpose | Has URL | File path |
+|---|---|---|---|
+| **Page** | Routable content | Yes | `models/pages/<key>.model` |
+| **Entry** | Shared/reusable data (nav, footer, authors) | No | `models/entries/<key>.model` |
+| **Block** | Reusable field group embedded in pages/entries | No | `models/blocks/<key>.model` |
+
+All three can be **single** (one record) or **collection** (many records, key ends with `[]`).
+
+### .model File Format
+
+JSON structure without quotes on keys or string values. Scalar values are the field type name.
+
+```
+{
+    title: text,
+    image: image,
+    content: markdown
+}
+```
+
+**Groups** — Nest fields in an object:
+```
+{
+    hero: {
+        heading: text,
+        background: image
+    }
+}
+```
+
+**Collections** (repeatable lists) — Wrap a group in `[]`:
+```
+{
+    features: [
+        {
+            title: text,
+            icon: image
+        }
+    ]
+}
+```
+
+**Block reference** — Use `block(key)`:
+```
+{
+    cta: block(cta)
+}
+```
+
+**Entry reference** — Use `entry(key)` for one, `[entry(key)]` for many:
+```
+{
+    author: entry(authors),
+    tags: [entry(tags)]
+}
+```
+
+### Field Types
+
+| Type | Returns |
+|---|---|
+| `text` | String |
+| `paragraph` | String (multiline) |
+| `richtext` | HTML string |
+| `markdown` | HTML string (pre-rendered) |
+| `number` | Number |
+| `boolean` | `true` / `false` |
+| `date` | `YYYY-MM-DD` |
+| `datetime` | ISO 8601 string |
+| `time` | `HH:mm` |
+| `color` | String (hex or name) |
+| `link` | URL string or relative path |
+| `image` | `{ url, alt }` |
+| `video` | `{ url, embed }` |
+| `code` | String |
+| `json` | Object or array |
+| `sheet` | Array of arrays |
+| `location` | `{ latitude, longitude }` |
+| `block(key)` | Block object |
+| `entry(key)` | Entry object(s) |
+
+---
+
+## EJS Templates
+
+### Syntax
+
+| Tag | Purpose |
+|---|---|
+| `<%= expr %>` | Output with HTML escaping (text content) |
+| `<%- expr %>` | Output raw HTML (blocks, images, rich text, helpers) |
+| `<% code %>` | Execute JS (loops, conditionals, variables) |
+
+### Template Context
+
+Every template receives these variables:
+
+| Variable | Type | Description |
 |---|---|---|
-| `item` | All templates | The current record's field data |
-| `pages` | All templates | All page records in the site |
-| `entries` | All templates | All entry records, keyed by model |
-| `images` | All templates | All media library images |
-| `options` | All templates | All option set values |
+| `item` | Object | Current page, block, or entry being rendered |
+| `pages` | Array | All page records (each has `_path`, `_slug`, fields) |
+| `entries` | Object | All entries keyed by model handle |
+| `main` | String | Rendered page template output (**layout only**) |
 
-`item` is always the current record — the page being rendered, the block instance being rendered, or the entry being rendered. Global variables (`pages`, `entries`, etc.) give any template access to the full site content without additional API calls.
+`item` always refers to the current record. In a page template, `item` is the page. In a block template, `item` is the block instance. In an entry template, `item` is the entry.
 
----
-
-### The `render()` Function
-```ejs
-<%- render(item.sections) %>
-```
-
-This is the only line needed in a page template to output all dynamic block sections. It:
-
-1. Iterates over every block instance in `item.sections`
-2. Looks up each block's EJS template by block model type
-3. Renders the template with that block's field data as `item`
-4. Concatenates and returns the full HTML output
-
-The page template never needs to know which block types are present.
+Page records include: `item._path`, `item._slug` (collections), `item._meta.updated_at`.
 
 ---
-
-### Build Output
-
-- One HTML file per page record
-- Assets (CSS, JS) included as-is
-- Tailwind CSS processed automatically — no config required
-- Output is a self-contained static site, compatible with any host
- 
-
-## Workspace Information
-
-This is a **synced SleekCMS workspace**. Files are automatically synced with the SleekCMS server.
-
-### Important Notes:
-- **File edits are auto-synced** - changes are automatically saved to the server
-- **DO NOT create new files** - new templates must be created via the SleekCMS dashboard
-- **Deleting files** will also delete them from the server
-
----
-
-Templates use [EJS](https://ejs.co/) syntax. The template receives a context object with site content and helper functions.
-
-## Directory structure
-- css/tailwind.css - tailwind config v4
-- css/*.css - other styles css
-- js/*.js - script files
-- views/blocks/*.ejs - ejs templates for each block. Blocks are groups of fields, used as a field type in entries or pages
-- views/entries/*.ejs - ejs template corresponding to each entry. Entries are regular records and can be referenced by other models
-- views/pages/*.ejs - ejs template corresponding to each page or page collections (path/[slug])
-- All _index.ejs are for collection of pages and created for each [slug]
-- .sleekcms/types.ts - TypeScript type definitions for all available data models
-
-**Note:** Do not create any new files. You can suggest creating new models or ask for model schema but don't add any new files.
-
-## TypeScript Types
-
-The `.sleekcms/types.ts` file contains TypeScript type definitions for all content models in this workspace. **Always read this file first** to understand the exact structure of:
-- Page types and their fields
-- Entry types and their fields  
-- Block types and their fields
-- Available images, options, and other data
-
-Use these types to ensure you're accessing the correct field names and understanding the data structure when creating or editing templates.
-
-## Available Data
-
-- `item` — The current page, entry, or block being rendered. Fields depend on the schema (e.g. `item.title`, `item.body`, `item.image`).
-- `pages` — Array of all pages. Each page has `_path`, `_slug`, and its own fields.
-- `entries` — Object of entries keyed by handle (e.g. `entries.header`, `entries.footer`).
-- `images` — Object of images keyed by name. Each has `{ url, raw, alt }`.
-- `options` — Object of option sets keyed by name. Each is an array of `{ label, value }`.
-- `main` — The rendered HTML from the previous template in the chain (used in base/layout templates).
-
-Note: Although all data can be accessed directly, best to use Helper function instead of accessing it directly.
 
 ## Helper Functions
 
-### Content Querying
+### Content Access
 
-| Function | Description |
-|---|---|
-| `render(blocks:any)` | Render a block or section (array of blocks) to HTML |
-| `getEntry(handle:string)` | Get an entry by handle |
-| `getPage(path:string)` | Get a page with the exact path |
-| `getPages(path:string, {collection?: boolean})` | Get all pages where path begins with the string. |
-| `getSlugs(path:string)` | Get slugs of pages under a path |
-| `getImage(name:string)` | Get an image object by name |
-| `getOptions(name:string)` | Get an option set by name |
-| `getContent(query?)` | Get all content, or filter with a [JMESPath](https://jmespath.org/) query |
-| `path(page)` | Get the URL path of a page |
+| Function | Returns | Description |
+|---|---|---|
+| `getPage(path)` | Object \| undefined | Page by exact path |
+| `getPages(path, opts?)` | Array | Pages where path starts with prefix. `{ collection: true }` for collection pages only |
+| `getEntry(handle)` | Object \| Array | Entry by handle. Single → object, collection → array |
+| `getSlugs(path)` | string[] | Slugs under a collection path |
+| `getImage(name)` | Object \| undefined | Site-level image by handle |
+| `getOptions(name)` | Array \| undefined | Option set as `[{ label, value }]` |
+| `getContent(query?)` | Any | Full content payload, or filter with JMESPath |
+| `path(page)` | String | URL path of a page object |
+
+### Rendering
+
+| Function | Returns | Description |
+|---|---|---|
+| `render(val, separator?)` | HTML string | Render a block/entry (or array of them) through its template |
 
 ### Images
 
-| Function | Description |
-|---|---|
-| `src(image:{url: string}, "WxH")` | Get a resized image URL. e.g. `src(item.image, "800x600")` |
-| `img(image:{url: string}, "WxH")` | Get a full `<img>` tag |
-| `picture(image:{url: string}, "WxH")` | Get a `<picture>` tag (supports dark/light variants) |
-| `svg(image:{url: string})` | Render an SVG reference |
+| Function | Returns | Description |
+|---|---|---|
+| `src(image, attr)` | URL string | Optimized image URL |
+| `img(image, attr)` | HTML string | `<img>` element |
+| `picture(image, attr)` | HTML string | `<picture>` with dark/light variants |
+| `svg(image, attr?)` | HTML string | Inline SVG with optional attributes |
 
-Size can be a string `"WxH"` or an object `{ w, h, fit, class, style }`.
+`attr` can be `"WxH"` string or `{ w, h, size, fit, type, class, style }` object.
 
 ### Head Injection
 
-Call these to add elements to `<head>`. Deduplicated automatically.
+Call from **any template** (page, block, entry, or layout). Deduplicated automatically.
 
 | Function | Description |
 |---|---|
-| `meta(attrs)` | Add a `<meta>` tag. e.g. `meta({ name: "description", content: "..." })` |
-| `link(attrs)` | Add a `<link>` tag |
-| `style(css)` | Add a `<style>` block |
-| `script(js)` | Add a `<script>` block |
-| `title(text)` | Set the page `<title>` |
-| `seo()` | Auto-generate SEO meta tags from `item.seo` or `item.title`/`item.description`/`item.image` |
+| `title(text)` | Set page `<title>` |
+| `meta(attrs)` | Add `<meta>` tag |
+| `link(value, order?)` | Add `<link>` tag (string URL auto-detects type, or pass object) |
+| `style(css, order?)` | Add `<style>` block |
+| `script(value, order?)` | Add `<script>` (`.js` URL → external, otherwise inline) |
 
-## Template Types
+---
 
-- **main** — Renders the content for the current item.
-- **base** — Layout wrapper. Use `<%- main %>` to output the rendered main content.
+## SEO
 
-## Examples
+Create a **block model** (e.g., `seo.model`) and add SEO tags manually in its template:
 
-### Simple page template (main)
-```ejs
-<h1><%= item.title %></h1>
-<div><%- item.body %></div>
+**`models/blocks/seo.model`**
+```
+{
+    title: text,
+    description: paragraph,
+    image: image
+}
 ```
 
-### Render blocks
+**`blocks/seo.ejs`**
 ```ejs
-<%- render(item.blocks) %>
-```
-
-### List pages
-```ejs
-<% for (let page of getPages('/blog', {collection: true})) { %>
-  <a href="<%= path(page) %>"><%= page.title %></a>
+<% if (item.title) title(item.title) %>
+<% if (item.description) meta({ name: 'description', content: item.description }) %>
+<% if (item.image) { %>
+  <% meta({ property: 'og:image', content: src(item.image, '1200x630') }) %>
 <% } %>
 ```
 
-### Image
-```ejs
-<%- img(item.image, "600x400") %>
-```
+Then include `seo: block(seo)` in any page model and render it: `<%- render(item.seo) %>`
 
-### Base layout
+---
+
+## Examples
+
+### Layout
+
 ```ejs
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title><%= item.title %></title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body>
-  <%- render(entries.header) %>
-  <%- main %>
-  <%- render(entries.footer) %>
+  <% const header = getEntry('header'); %>
+  <header>
+    <%- render(header) %>
+  </header>
+
+  <main><%- main %></main>
+
+  <% const footer = getEntry('footer'); %>
+  <footer>
+    <%- render(footer) %>
+  </footer>
 </body>
 </html>
 ```
 
-### SEO
+### Page template
+
 ```ejs
-<% seo() %>
+<% title(item.title + ' | My Site') %>
+<% link('/css/styles.css') %>
+<% script('/js/app.js') %>
+
+<h1><%= item.title %></h1>
+<%- img(item.image, '1200x600') %>
+<div><%- item.content %></div>
 ```
 
-## EJS Syntax Quick Reference
+### Block template
 
-- `<%= expr %>` — Output escaped HTML
-- `<%- expr %>` — Output raw/unescaped HTML (use for rendered blocks, images, HTML fields)
-- `<% code %>` — Execute JS (loops, conditionals)
+```ejs
+<section class="hero" style="background-image: url('<%- src(item.background, '1920x800') %>')">
+  <h2><%= item.heading %></h2>
+  <p><%= item.subheading %></p>
+  <a href="<%= item.cta_link %>" class="btn"><%= item.cta_label %></a>
+</section>
+```
+
+### List collection pages
+
+```ejs
+<% for (const post of getPages('/blog', { collection: true })) { %>
+  <a href="<%- path(post) %>">
+    <%- img(post.image, '400x250') %>
+    <h3><%= post.title %></h3>
+  </a>
+<% } %>
+```
+
+### Render blocks and entry references
+
+Given a model:
+```
+{
+    hero: block(hero),
+    team: [entry(people)]
+}
+```
+
+Template:
+```ejs
+<%- render(item.hero) %>
+
+<% for (const person of item.team) { %>
+  <%- render(person) %>
+<% } %>
+```
+
+---
+
+## Rules for AI
+
+1. Include CSS/JS files via **`link()`** and **`script()`** — never raw `<link>` or `<script>` tags in templates.
+2. Exception: `/css/tailwind.css` is auto-injected — do **not** add it via `link()`.
+3. Markdown and rich text fields return **HTML** — always use `<%- %>` (unescaped) to output them.

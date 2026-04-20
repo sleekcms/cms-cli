@@ -1,0 +1,12 @@
+{
+  "overrides": [
+    {
+      "files": "*.model",
+      "options": {
+        "semi": false,
+        "singleQuote": true,
+        "trailingComma": "all"
+      }
+    }
+  ]
+}
