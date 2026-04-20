@@ -96,7 +96,10 @@ async function refreshFile(filePath) {
  */
 async function flushUpdates() {
     const entries = Object.entries(pendingUpdates);
-    for (const [updateKey, entry] of entries) {
+    const modelEntries = entries.filter(([, e]) => e.isModel);
+    const templateEntries = entries.filter(([, e]) => !e.isModel);
+
+    for (const [updateKey, entry] of [...modelEntries, ...templateEntries]) {
         delete pendingUpdates[updateKey];
         const { filePath, relativePath, isModel, parsed } = entry;
         try {
