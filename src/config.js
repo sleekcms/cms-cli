@@ -19,9 +19,9 @@ const TYPE_CONFIG = {
     PAGE:  { dir: 'pages',   ext: '.ejs' },
     ENTRY: { dir: 'entries', ext: '.ejs' },
     BLOCK: { dir: 'blocks',  ext: '.ejs' },
-    JS:    { dir: 'js',      ext: '.js' },
-    CSS:   { dir: 'css',     ext: '.css' },
-    BASE:  { dir: 'layouts', ext: '.ejs' },
+    JS:    { dir: 'js',      ext: '.js',  noModel: true },
+    CSS:   { dir: 'css',     ext: '.css', noModel: true },
+    BASE:  { dir: 'layouts', ext: '.ejs', noModel: true },
 };
 
 const DEBOUNCE_DELAY = 1000; // 1 second delay

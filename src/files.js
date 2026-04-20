@@ -25,7 +25,7 @@ function getFilePath(key, type) {
  */
 function getModelFilePath(key, type) {
     const config = TYPE_CONFIG[type];
-    if (!config) return null;
+    if (!config || config.noModel) return null;
     return `models/${config.dir}/${key}.model`;
 }
 
