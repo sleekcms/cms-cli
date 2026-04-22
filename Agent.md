@@ -23,6 +23,9 @@ Keys are lowercase, dash-separated. For pages, `_` in the key maps to `/` in the
 | `blog[]` | `/blog/<slug>` (one page per entry) |
 | `docs_getting-started` | `/docs/getting-started` |
 
+The keys for model and template are the same. 
+Example. models/pages/blog[].model and pages/blog[].ejs
+
 ---
 
 ## Folder Structure
@@ -319,3 +322,4 @@ Template:
 1. Include CSS/JS files via **`link()`** and **`script()`** — never raw `<link>` or `<script>` tags in templates.
 2. Exception: `/css/tailwind.css` is auto-injected — do **not** add it via `link()`.
 3. Markdown and rich text fields return **HTML** — always use `<%- %>` (unescaped) to output them.
+4. Use modern design with tailwind unless design details are specified
