@@ -66,6 +66,14 @@ async function fetchModels() {
 }
 
 /**
+ * Fetch all content records from the API
+ */
+async function fetchContentRecords() {
+    const response = await apiClient.get("/get_records");
+    return response.data;
+}
+
+/**
  * Save a template to the API
  */
 async function saveTemplate(key, type, code) {
@@ -80,12 +88,22 @@ async function saveModel(key, type, shape) {
     return response.data;
 }
 
+/**
+ * Save a content record to the API
+ */
+async function saveRecord(key, type, item) {
+    const response = await apiClient.post("/save_record", { key, type, item });
+    return response.data;
+}
+
 module.exports = {
     initApiClients,
     fetchSite,
     getSite,
     fetchTemplates,
     fetchModels,
+    fetchContentRecords,
     saveTemplate,
     saveModel,
+    saveRecord,
 };

@@ -15,6 +15,7 @@ const api = require("./src/api");
 const cli = require("./src/cli");
 const fileUtils = require("./src/files");
 const watcher = require("./src/watcher");
+const { ALLOW_CONTENT_UPDATES } = require("./src/config");
 
 // Load agent instructions
 const agentMdContent = fs.readFileSync(path.join(__dirname, "Agent.md"), "utf-8");
@@ -88,6 +89,7 @@ async function initConfig() {
  */
 async function fetchFiles() {
     const currentFileMap = watcher.getFileMap();
+    const currentContentRecordMap = watcher.getContentRecordMap();
 
     try {
         console.log("📥 Fetching templates...");
@@ -154,6 +156,48 @@ async function fetchFiles() {
             console.log(`✔️ Downloaded ${modelCount} model(s).`);
         } catch (modelsError) {
             console.warn("⚠️ Could not fetch models:", modelsError.response?.data || modelsError.message);
+        }
+
+        // Fetch and save content records
+        if (ALLOW_CONTENT_UPDATES) try {
+            console.log("📥 Fetching content records...");
+            const records = await api.fetchContentRecords();
+            const oldContentPaths = new Set(Object.keys(currentContentRecordMap));
+            const newContentPaths = new Set();
+            const newContentRecordMap = {};
+            let contentRecordCount = 0;
+
+            for (const record of records) {
+                const { key, type, item } = record;
+                const relativePath = fileUtils.getContentRecordFilePath(key, type);
+
+                if (relativePath) {
+                    const filePath = path.join(VIEWS_DIR, relativePath);
+                    const content = JSON.stringify(item, null, 2);
+                    await fs.outputFile(filePath, content);
+                    const normalizedPath = relativePath.replace(/\\/g, "/");
+                    newContentRecordMap[normalizedPath] = { key, type, item };
+                    newContentPaths.add(normalizedPath);
+                    contentRecordCount++;
+                }
+            }
+
+            for (const oldPath of oldContentPaths) {
+                if (!newContentPaths.has(oldPath)) {
+                    const filePath = path.join(VIEWS_DIR, oldPath);
+                    try {
+                        await fs.unlink(filePath);
+                        console.log(`🗑️  Removed content record (deleted on server): ${oldPath}`);
+                    } catch (err) {
+                        // File may already be gone locally
+                    }
+                }
+            }
+
+            watcher.setContentRecordMap(newContentRecordMap);
+            console.log(`✔️ Downloaded ${contentRecordCount} content record(s).`);
+        } catch (recordsError) {
+            console.warn("⚠️ Could not fetch content records:", recordsError.response?.data || recordsError.message);
         }
         
         // Write agent instruction files and VS Code settings

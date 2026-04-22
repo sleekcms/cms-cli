@@ -29,10 +29,14 @@ const DEBOUNCE_DELAY = 1000; // 1 second delay
 // Whether to allow updating models (e.g., syncing model changes)
 const ALLOW_MODEL_UPDATES = true;
 
+// Whether to fetch and sync content records
+const ALLOW_CONTENT_UPDATES = true;
+
 module.exports = {
     API_BASE_URLS,
     TEMPLATE_API_BASE_URLS,
     TYPE_CONFIG,
     DEBOUNCE_DELAY,
     ALLOW_MODEL_UPDATES,
+    ALLOW_CONTENT_UPDATES,
 };

@@ -30,6 +30,15 @@ function getModelFilePath(key, type) {
 }
 
 /**
+ * Get content record file path from key and type
+ */
+function getContentRecordFilePath(key, type) {
+    const typeDir = TYPE_CONFIG[type]?.dir;
+    if (!typeDir || !key) return null;
+    return `content/${typeDir}/${key}.json`;
+}
+
+/**
  * Parse file path to get type and key
  */
 function parseFilePath(filePath) {
@@ -46,6 +55,23 @@ function parseFilePath(filePath) {
         }
     }
     return null;
+}
+
+/**
+ * Parse content record file path to get type and key
+ */
+function parseContentRecordFilePath(filePath) {
+    if (!filePath.startsWith('content/')) return null;
+    const rest = filePath.slice(8); // Remove 'content/'
+    const slashIdx = rest.indexOf('/');
+    if (slashIdx === -1) return null;
+    const typeDir = rest.slice(0, slashIdx);
+    const keyWithExt = rest.slice(slashIdx + 1);
+    if (!keyWithExt.endsWith('.json')) return null;
+    const key = keyWithExt.slice(0, -5); // Remove '.json'
+    const type = Object.keys(TYPE_CONFIG).find(t => TYPE_CONFIG[t].dir === typeDir);
+    if (!type) return null;
+    return { key, type };
 }
 
 /**
@@ -117,8 +143,10 @@ module.exports = {
     kebabCase,
     getFilePath,
     getModelFilePath,
+    getContentRecordFilePath,
     parseFilePath,
     parseModelFilePath,
+    parseContentRecordFilePath,
     writeVSCodeSettings,
     writeAgentFiles,
     cleanupFiles,

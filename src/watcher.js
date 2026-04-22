@@ -5,16 +5,18 @@
 const fs = require("fs-extra");
 const path = require("path");
 const chokidar = require("chokidar");
-const { DEBOUNCE_DELAY } = require("./config");
-const { parseFilePath, parseModelFilePath, getModelFilePath } = require("./files");
+const JSON5 = require("json5");
+const { DEBOUNCE_DELAY, ALLOW_CONTENT_UPDATES, ALLOW_MODEL_UPDATES } = require("./config");
+const { parseFilePath, parseModelFilePath, parseContentRecordFilePath, getModelFilePath } = require("./files");
 const api = require("./api");
 
 let watcher = null;
 let isShuttingDown = false;
-const pendingUpdates = {}; // updateKey -> { filePath, relativePath, isModel, parsed }
+const pendingUpdates = {}; // updateKey -> { filePath, relativePath, isModel, isContent, parsed }
 let debounceTimer = null;
 let fileMap = {};
 let modelMap = {};
+let contentRecordMap = {};
 const ignoredFiles = new Set();
 
 // These will be set during initialization
@@ -58,6 +60,20 @@ function setModelMap(map) {
 }
 
 /**
+ * Get the content record map
+ */
+function getContentRecordMap() {
+    return contentRecordMap;
+}
+
+/**
+ * Set the content record map
+ */
+function setContentRecordMap(map) {
+    contentRecordMap = map;
+}
+
+/**
  * Set the shutdown flag
  */
 function setShuttingDown(value) {
@@ -97,13 +113,27 @@ async function refreshFile(filePath) {
 async function flushUpdates() {
     const entries = Object.entries(pendingUpdates);
     const modelEntries = entries.filter(([, e]) => e.isModel);
-    const templateEntries = entries.filter(([, e]) => !e.isModel);
+    const contentEntries = entries.filter(([, e]) => e.isContent);
+    const templateEntries = entries.filter(([, e]) => !e.isModel && !e.isContent);
 
-    for (const [updateKey, entry] of [...modelEntries, ...templateEntries]) {
+    for (const [updateKey, entry] of [...modelEntries, ...contentEntries, ...templateEntries]) {
         delete pendingUpdates[updateKey];
-        const { filePath, relativePath, isModel, parsed } = entry;
+        const { filePath, relativePath, isModel, isContent, parsed } = entry;
         try {
-            if (isModel) {
+            if (isContent) {
+                const record = contentRecordMap[relativePath];
+                let item;
+                try {
+                    item = JSON5.parse(await fs.readFile(filePath, "utf-8"));
+                } catch {
+                    console.error(`❌ Invalid JSON in content record: ${relativePath}`);
+                    continue;
+                }
+                if (record && JSON.stringify(item) === JSON.stringify(record.item)) continue;
+                const response = await api.saveRecord(parsed.key, parsed.type, item);
+                contentRecordMap[relativePath] = { key: parsed.key, type: parsed.type, item: response.item ?? item };
+                console.log(`✅ ${record ? 'Updated' : 'Created'} content record for: ${relativePath}`);
+            } else if (isModel) {
                 const model = modelMap[relativePath];
                 const shape = await fs.readFile(filePath, "utf-8");
                 if (model && shape === model.shape) continue;
@@ -122,7 +152,9 @@ async function flushUpdates() {
                 console.log(`✅ ${file ? 'Updated' : 'Created'} template for: ${relativePath}`);
             }
         } catch (error) {
-            if (isModel) {
+            if (isContent) {
+                console.error("❌ Error updating content record:", error.response?.data || error.message);
+            } else if (isModel) {
                 console.error("❌ Error updating model:", error.response?.data || error.message);
                 if (fetchFilesFn) await fetchFilesFn();
             } else {
@@ -142,9 +174,17 @@ function scheduleUpdate(filePath) {
     const relativePath = path.relative(viewsDir, filePath).replace(/\\/g, "/");
     if (ignoredFiles.has(relativePath)) return;
 
+    const isContent = relativePath.startsWith('content/');
     const isModel = relativePath.startsWith('models/');
 
-    if (isModel) {
+    if (isContent) {
+        const parsed = parseContentRecordFilePath(relativePath);
+        if (!parsed) {
+            console.warn(`⚠️ Skipping update: Invalid content record file path ${relativePath}`);
+            return;
+        }
+        pendingUpdates[`content:${parsed.type}:${parsed.key}`] = { filePath, relativePath, isContent: true, parsed };
+    } else if (isModel) {
         const parsed = parseModelFilePath(relativePath);
         if (!parsed) {
             console.warn(`⚠️ Skipping update: Invalid model file path ${relativePath}`);
@@ -179,7 +219,9 @@ function monitorFiles() {
     watcher = chokidar.watch(viewsDir, { 
         persistent: true, 
         ignoreInitial: true,
-        ignored: [/\.vscode\//, /AGENT\.md$/, /CLAUDE\.md$/, /\.sleekcms\//]
+        ignored: [/\.vscode\//, /AGENT\.md$/, /CLAUDE\.md$/, /\.sleekcms\//, 
+            ...(!ALLOW_CONTENT_UPDATES ? [/\/content\//] : []), 
+            ...(!ALLOW_MODEL_UPDATES ? [/\/models\//] : [])]
     })
     .on("change", (filePath) => {
         scheduleUpdate(filePath);
@@ -187,7 +229,9 @@ function monitorFiles() {
     .on("add", (filePath) => {
         const relativePath = path.relative(viewsDir, filePath).replace(/\\/g, "/");
         if (ignoredFiles.has(relativePath)) return;
-        if (relativePath.startsWith('models/')) {
+        if (relativePath.startsWith('content/')) {
+            if (contentRecordMap[relativePath]) return;
+        } else if (relativePath.startsWith('models/')) {
             if (modelMap[relativePath]) return;
         } else {
             if (fileMap[relativePath]) return;
@@ -216,6 +260,8 @@ module.exports = {
     setFileMap,
     getModelMap,
     setModelMap,
+    getContentRecordMap,
+    setContentRecordMap,
     setShuttingDown,
     refreshFile,
     monitorFiles,
