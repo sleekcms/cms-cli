@@ -168,7 +168,7 @@ How values in content JSON map to the types declared in the model:
 | `date` | `"YYYY-MM-DD"` string |
 | `datetime` | ISO 8601 string |
 | `time` | `"HH:mm"` string |
-| `image` | Either a resolved `{ "url": "...", "alt": "..." }` object, **or** a shortcut string `"<source>:<search>"` (e.g., `"pexels:doctor"`). Supported sources: `unsplash`, `pexels`, `pixabay`, `iconify`. On save, the sync engine resolves the shortcut to a full image object automatically. |
+| `image` | Either a resolved `{ "url": "...", "alt": "..." }` object, **or** a shortcut string `"<source>:<search>"` (e.g., `"pexels:doctor"` , `"url:https://picsum.photos/200.jpg"`, etc). Supported sources: `unsplash`, `pexels`, `pixabay`, `iconify`, `url`. On save, the sync engine resolves the shortcut/link to a full image object automatically. |
 | `video` | `{ "url": "...", "embed": "..." }` |
 | `json` | Object or array |
 | `sheet` | Array of arrays |
