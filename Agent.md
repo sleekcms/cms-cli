@@ -23,8 +23,12 @@ Keys are lowercase, dash-separated. For pages, `_` in the key maps to `/` in the
 | `blog[]` | `/blog/<slug>` (one page per entry) |
 | `docs_getting-started` | `/docs/getting-started` |
 
-The keys for model and template are the same. 
-Example. models/pages/blog[].model and pages/blog[].ejs
+The keys for model, template, and content file are the same — if the model is a **collection**, the `[]` suffix is part of the key and must appear on **every** related file.
+
+Examples:
+- Collection page `blog`: `models/pages/blog[].model`, `pages/blog[].ejs`, `content/pages/blog[]/<slug>.json`
+- Collection entry `testimonials`: `models/entries/testimonials[].model`, `entries/testimonials[].ejs`, `content/entries/testimonials[].json`
+- Single page `about`: `models/pages/about.model`, `pages/about.ejs`, `content/pages/about.json` (no `[]`)
 
 ---
 
@@ -46,7 +50,8 @@ Example. models/pages/blog[].model and pages/blog[].ejs
 
 /content/pages/<key>.json          Content for a single (non-list) page
 /content/pages/<key>/<slug>.json   Content for one item of a collection page (<key> ends with [])
-/content/entries/<key>.json        Content for an entry (object for single, array for collection)
+/content/entries/<key>.json        Content for a single entry (object)
+/content/entries/<key>[].json      Content for a collection entry (array of objects; <key>[] matches the model filename)
 ```
 
 > **Tailwind**: Creating `/css/tailwind.css` enables Tailwind. It is compiled and injected automatically — do NOT add it via `link()`.
@@ -154,7 +159,7 @@ Content files are JSON records under `/content/` that hold the actual values for
 | Single page (e.g., `about`) | `content/pages/about.json` | Object |
 | Collection page (e.g., `blog[]`) | `content/pages/blog[]/<slug>.json` (the `[]` is part of the key, not an extra suffix) | Object; one file per slug |
 | Single entry (e.g., `header`) | `content/entries/header.json` | Object |
-| Collection entry (e.g., `authors`) | `content/entries/authors.json` | Array of objects |
+| Collection entry (e.g., `authors`) | `content/entries/authors[].json` (the `[]` is part of the key — same as the model filename) | Array of objects |
 
 ### Field serialization
 
@@ -390,4 +395,5 @@ Template:
 5. To change what appears on a page or in shared data, edit the matching JSON under `/content/` — do **not** hard-code content into `.ejs` templates. Templates define structure; content files hold the values.
 6. Fields in a content JSON file must match the keys defined in the corresponding `.model`. Adding a new field requires updating the `.model` first.
 7. Collection page items each live in their own file under `content/pages/<key>/<slug>.json` — the collection key already includes `[]` (e.g., `content/pages/blog[]/my-post.json`). The `<slug>` filename is the URL segment; renaming the file renames the URL.
-8. For `image` fields in content JSON, prefer the shortcut form `"<source>:<search>"` (sources: `unsplash`, `pexels`, `pixabay`, `iconify`) — e.g., `"pexels:doctor"`. The sync engine resolves it to a full `{ url, alt }` object on save. Only write the object form when you have a specific asset URL.
+8. **Collection key suffix `[]` is mandatory and must appear on every related file.** For a collection model (pages or entries — e.g., `blog`, `testimonials`, `authors`), the key `<name>[]` is part of the filename on the model, template, **and** content JSON: `models/entries/testimonials[].model`, `entries/testimonials[].ejs`, `content/entries/testimonials[].json` (array). Same rule for collection pages: `models/pages/blog[].model`, `pages/blog[].ejs`, and one file per slug under `content/pages/blog[]/<slug>.json`. Never drop the `[]` — files without it are treated as singles and will not resolve.
+9. For `image` fields in content JSON, prefer the shortcut form `"<source>:<search>"` (sources: `unsplash`, `pexels`, `pixabay`, `iconify`) — e.g., `"pexels:doctor"`. The sync engine resolves it to a full `{ url, alt }` object on save. Only write the object form when you have a specific asset URL.
