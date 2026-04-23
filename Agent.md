@@ -43,6 +43,10 @@ Example. models/pages/blog[].model and pages/blog[].ejs
 /css/<name>.css                Stylesheets (require head injection)
 /css/tailwind.css              Tailwind CSS (auto-compiled, auto-injected)
 /js/<name>.js                  Scripts (require head injection)
+
+/content/pages/<key>.json          Content for a single (non-list) page
+/content/pages/<key>/<slug>.json   Content for one item of a collection page (<key> ends with [])
+/content/entries/<key>.json        Content for an entry (object for single, array for collection)
 ```
 
 > **Tailwind**: Creating `/css/tailwind.css` enables Tailwind. It is compiled and injected automatically — do NOT add it via `link()`.
@@ -134,6 +138,66 @@ JSON structure without quotes on keys or string values. Scalar values are the fi
 | `location` | `{ latitude, longitude }` |
 | `block(key)` | Block object |
 | `entry(key)` | Entry object(s) |
+
+---
+
+## Content Records
+
+Content files are JSON records under `/content/` that hold the actual values for the fields declared in each `.model`. Editing a content file and saving it triggers the same sync-build-deploy loop as editing a template — you can view and edit content directly from this workspace.
+
+**Blocks have no top-level content files.** Block data is embedded inside the page or entry that references the block.
+
+### File layout
+
+| Model shape | File path | JSON top-level |
+|---|---|---|
+| Single page (e.g., `about`) | `content/pages/about.json` | Object |
+| Collection page (e.g., `blog[]`) | `content/pages/blog[]/<slug>.json` (the `[]` is part of the key, not an extra suffix) | Object; one file per slug |
+| Single entry (e.g., `header`) | `content/entries/header.json` | Object |
+| Collection entry (e.g., `authors`) | `content/entries/authors.json` | Array of objects |
+
+### Field serialization
+
+How values in content JSON map to the types declared in the model:
+
+| Model type | JSON value |
+|---|---|
+| `text`, `paragraph`, `richtext`, `markdown`, `code`, `color`, `link` | String |
+| `number` | Number |
+| `boolean` | `true` / `false` |
+| `date` | `"YYYY-MM-DD"` string |
+| `datetime` | ISO 8601 string |
+| `time` | `"HH:mm"` string |
+| `image` | Either a resolved `{ "url": "...", "alt": "..." }` object, **or** a shortcut string `"<source>:<search>"` (e.g., `"pexels:doctor"`). Supported sources: `unsplash`, `pexels`, `pixabay`, `iconify`. On save, the sync engine resolves the shortcut to a full image object automatically. |
+| `video` | `{ "url": "...", "embed": "..." }` |
+| `json` | Object or array |
+| `sheet` | Array of arrays |
+| `location` | `{ "latitude": n, "longitude": n }` |
+| `block(key)` | Object matching that block's model (embedded, not a reference) |
+| `entry(key)` / `[entry(key)]` | Slug string / array of slug strings referencing entries by handle |
+| Group `{ ... }` | Nested object |
+| Collection `[{ ... }]` | Array of nested objects |
+
+### Example
+
+Given a model:
+
+```
+{ title: text, image: image, hero: block(hero), tags: [entry(tags)] }
+```
+
+The content file at `content/pages/about.json`:
+
+```json
+{
+    "title": "About us",
+    "image": "pexels:team meeting",
+    "hero": { "heading": "Hello", "subheading": "Welcome" },
+    "tags": ["engineering", "design"]
+}
+```
+
+Here `image` uses the shortcut form — on save, the sync engine replaces it with a real image object (`{ "url": "...", "alt": "..." }`). Write the object form directly when you have a specific asset URL.
 
 ---
 
@@ -322,4 +386,8 @@ Template:
 1. Include CSS/JS files via **`link()`** and **`script()`** — never raw `<link>` or `<script>` tags in templates.
 2. Exception: `/css/tailwind.css` is auto-injected — do **not** add it via `link()`.
 3. Markdown and rich text fields return **HTML** — always use `<%- %>` (unescaped) to output them.
-4. Use modern design with tailwind unless design details are specified
+4. Use modern design with tailwind unless design details are specified.
+5. To change what appears on a page or in shared data, edit the matching JSON under `/content/` — do **not** hard-code content into `.ejs` templates. Templates define structure; content files hold the values.
+6. Fields in a content JSON file must match the keys defined in the corresponding `.model`. Adding a new field requires updating the `.model` first.
+7. Collection page items each live in their own file under `content/pages/<key>/<slug>.json` — the collection key already includes `[]` (e.g., `content/pages/blog[]/my-post.json`). The `<slug>` filename is the URL segment; renaming the file renames the URL.
+8. For `image` fields in content JSON, prefer the shortcut form `"<source>:<search>"` (sources: `unsplash`, `pexels`, `pixabay`, `iconify`) — e.g., `"pexels:doctor"`. The sync engine resolves it to a full `{ url, alt }` object on save. Only write the object form when you have a specific asset URL.
