@@ -305,6 +305,23 @@ Then include `seo: block(seo)` in any page model and render it: `<%- render(item
 
 ---
 
+## Forms
+
+Any `<form>` with a `data-sleekcms="<name>"` attribute works automatically — submissions are captured, stored, and viewable in the CMS dashboard. No backend setup, no action URL, no JS required.
+
+```html
+<form data-sleekcms="contact">
+  <input name="name" type="text" required>
+  <input name="email" type="email" required>
+  <textarea name="message"></textarea>
+  <button type="submit">Send</button>
+</form>
+```
+
+The `<name>` value (e.g., `contact`, `newsletter`, `quote-request`) groups submissions by form. Use standard `name` attributes on inputs — each field is stored as-is.
+
+---
+
 ## Examples
 
 ### Layout
