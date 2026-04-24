@@ -127,7 +127,7 @@ JSON structure without quotes on keys or string values. Scalar values are the fi
 | `text` | String |
 | `paragraph` | String (multiline) |
 | `richtext` | HTML string |
-| `markdown` | HTML string (pre-rendered) |
+| `markdown` | Markdown string (use `marked()` to convert to HTML) |
 | `number` | Number |
 | `boolean` | `true` / `false` |
 | `date` | `YYYY-MM-DD` |
@@ -253,6 +253,7 @@ Page records include: `item._path`, `item._slug` (collections), `item._meta.upda
 | Function | Returns | Description |
 |---|---|---|
 | `render(val, separator?)` | HTML string | Render a block/entry (or array of them) through its template |
+| `marked(md)` | HTML string | Convert a markdown string to HTML |
 
 ### Images
 
@@ -407,7 +408,7 @@ Template:
 
 1. Include CSS/JS files via **`link()`** and **`script()`** — never raw `<link>` or `<script>` tags in templates.
 2. Exception: `/css/tailwind.css` is auto-injected — do **not** add it via `link()`.
-3. Markdown and rich text fields return **HTML** — always use `<%- %>` (unescaped) to output them.
+3. `richtext` returns **HTML** — use `<%- %>` (unescaped) to output it. `markdown` returns **raw markdown** — convert with `marked()` first: `<%- marked(item.content) %>`.
 4. Use modern design with tailwind unless design details are specified.
 5. To change what appears on a page or in shared data, edit the matching JSON under `/content/` — do **not** hard-code content into `.ejs` templates. Templates define structure; content files hold the values.
 6. Fields in a content JSON file must match the keys defined in the corresponding `.model`. Adding a new field requires updating the `.model` first.
