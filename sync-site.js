@@ -430,7 +430,17 @@ async function pushLocalChanges(viewsDir, cache, api) {
         }
         try {
             const resp = await api.saveRecord(parsed.key, parsed.type, item);
-            cache.contentRecordMap[rel] = { key: parsed.key, type: parsed.type, item: resp.item ?? item, mtimeMs: stat.mtimeMs };
+            const receivedItem = resp.item ?? item;
+            let finalMtime = stat.mtimeMs;
+            // Write server response back to file unless file was modified while save was in-flight
+            const currentStat = await fs.stat(full);
+            if (currentStat.mtimeMs === stat.mtimeMs) {
+                if (JSON.stringify(receivedItem) !== JSON.stringify(item)) {
+                    await fs.outputFile(full, JSON.stringify(receivedItem, null, 2));
+                    finalMtime = (await fs.stat(full)).mtimeMs;
+                }
+            }
+            cache.contentRecordMap[rel] = { key: parsed.key, type: parsed.type, item: receivedItem, mtimeMs: finalMtime };
             console.log(`✅ ${prior ? "Updated" : "Created"} content record: ${rel}`);
             pushed++;
         } catch (err) {
