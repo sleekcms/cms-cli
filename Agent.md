@@ -467,3 +467,6 @@ Template:
 7. Collection page items each live in their own file under `content/pages/<key>/<slug>.json` — the collection key already includes `[]` (e.g., `content/pages/blog[]/my-post.json`). The `<slug>` filename is the URL segment; renaming the file renames the URL.
 8. **Collection key suffix `[]` is mandatory and must appear on every related file.** For a collection model (pages or entries — e.g., `blog`, `testimonials`, `authors`), the key `<name>[]` is part of the filename on the model, template, **and** content JSON: `models/entries/testimonials[].model`, `entries/testimonials[].ejs`, `content/entries/testimonials[].json` (array). Same rule for collection pages: `models/pages/blog[].model`, `pages/blog[].ejs`, and one file per slug under `content/pages/blog[]/<slug>.json`. Never drop the `[]` — files without it are treated as singles and will not resolve.
 9. For `image` fields in content JSON, prefer the shortcut form `"<source>:<search>"` (sources: `unsplash`, `pexels`, `pixabay`, `iconify`) — e.g., `"pexels:doctor"`. The sync engine resolves it to a full `{ url, alt }` object on save. Only write the object form when you have a specific asset URL.
+10. Always create RSS feed for blogs and link them in meta so it is discoverable. Use "rss.xml" as the key.
+11. Make the sites extremely SEO friendly and sharing friendly
+
