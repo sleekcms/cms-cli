@@ -247,6 +247,7 @@ Page records include: `item._path`, `item._slug` (collections), `item._meta.upda
 | `getOptions(name)` | Array \| undefined | Option set as `[{ label, value }]` |
 | `getContent(query?)` | Any | Full content payload, or filter with JMESPath |
 | `path(page)` | String | URL path of a page object |
+| `url(pathOrPage?)` | String | Site origin (e.g. `https://example.com`). Pass a path string to get a full URL (`url('/blog')` → `https://example.com/blog`), or pass a page object to resolve its path into a full URL. |
 
 ### Rendering
 
@@ -320,6 +321,57 @@ Any `<form>` with a `data-sleekcms="<name>"` attribute works automatically — s
 ```
 
 The `<name>` value (e.g., `contact`, `newsletter`, `quote-request`) groups submissions by form. Use standard `name` attributes on inputs — each field is stored as-is.
+
+---
+
+## RSS Feeds
+
+Create an RSS feed by adding a page with the key `rss.xml` — this maps to the URL `/rss.xml`. Because the extension is `.xml`, the static server serves it with the correct content type automatically. The template outputs raw XML and must **not** use a layout.
+
+**`models/pages/rss.xml.model`**
+```
+{
+    title: text,
+    description: paragraph
+}
+```
+
+**`content/pages/rss.xml.json`**
+```json
+{
+    "title": "My Blog",
+    "description": "Latest posts from My Blog"
+}
+```
+
+**`pages/rss.xml.ejs`**
+```ejs
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title><%= item.title %></title>
+    <link><%= url() %></link>
+    <description><%= item.description %></description>
+    <% for (const post of getPages('/blog', { collection: true })) { %>
+    <item>
+      <title><%= post.title %></title>
+      <link><%= url(post) %></link>
+      <description><%= post.description %></description>
+      <pubDate><%= new Date(post._meta.updated_at).toUTCString() %></pubDate>
+      <guid><%= url(post) %></guid>
+    </item>
+    <% } %>
+  </channel>
+</rss>
+```
+
+Notes:
+- The key `rss.xml` follows the standard naming convention — the dot is part of the key as-is.
+- `getPages('/blog', { collection: true })` fetches all blog collection pages; adjust the path to match your collection key.
+- `url(post)` resolves the page object to a full absolute URL (e.g. `https://example.com/blog/my-post`) — no need to store the site URL in content.
+- `post._meta.updated_at` is an ISO 8601 timestamp; `.toUTCString()` converts it to RFC 822 format required by RSS.
+- Use a dedicated `description` or `summary` field in your blog model for feed excerpts; fall back to any short-text field if one doesn't exist.
+- To autodiscover the feed, add `<% link({ rel: 'alternate', type: 'application/rss+xml', title: 'RSS', href: '/rss.xml' }) %>` in your layout or page templates.
 
 ---
 
