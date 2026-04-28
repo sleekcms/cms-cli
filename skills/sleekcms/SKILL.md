@@ -62,7 +62,7 @@ Create or modify files in the workspace per the **Authoring reference** below. P
 
 ## 5. Push edits — `sync-site`
 
-After edits, run from inside the workspace (or pass `-d <workspace>`). No token argument:
+After edits, run from inside the workspace. No arguments:
 
 ```bash
 node <skill-dir>/scripts/sync-site.js
@@ -552,9 +552,10 @@ Template:
 
 ## `sync-site.js`
 
+Run from inside the workspace directory (created by `setup-site`). No arguments required for normal use.
+
 | Flag | Description |
 |---|---|
-| `-d, --dir <dir>` | Workspace directory (default: current directory). Must contain `.cache/token`. |
 | `--flush` | Discard the local cache and re-pull all files from the server. |
 
 Both exit `0` on success, `1` on error.

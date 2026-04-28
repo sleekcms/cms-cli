@@ -579,13 +579,12 @@ module.exports = {
 if (require.main === module) {
     program
         .name("sync-site")
-        .description("Incremental sync for an existing SleekCMS workspace. Reads the token from <workspace>/.cache/token (created by setup-site).")
-        .option("-d, --dir <dir>", "Workspace directory (default: current directory)")
+        .description("Incremental sync for an existing SleekCMS workspace. Run from the workspace directory (created by setup-site). Reads token and state from .cache/.")
         .option("--flush", "Discard the local cache and re-pull all files from the server")
         .parse(process.argv);
 
     const opts = program.opts();
-    const viewsDir = path.resolve(opts.dir || process.cwd());
+    const viewsDir = path.resolve(process.cwd());
     const tokenPath = path.join(viewsDir, ".cache", "token");
 
     if (!fs.existsSync(tokenPath)) {
