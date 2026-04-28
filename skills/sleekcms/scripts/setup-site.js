@@ -11,8 +11,6 @@
  * an incremental sync (no-op when nothing changed).
  */
 
-const fs = require("fs");
-const path = require("path");
 const { program } = require("commander");
 const { syncSite } = require("./sync-site");
 
@@ -26,14 +24,10 @@ program
 
 const opts = program.opts();
 
-const agentMdPath = path.join(__dirname, "..", "reference", "AGENT.md");
-const agentMd = fs.existsSync(agentMdPath) ? fs.readFileSync(agentMdPath, "utf-8") : undefined;
-
 syncSite({
     token: opts.token,
     path: opts.path,
     env: opts.env,
-    agentMd,
 })
     .then(({ viewsDir, site, isFirstRun, pulled }) => {
         if (isFirstRun) {
