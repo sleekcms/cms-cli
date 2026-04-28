@@ -13,7 +13,7 @@ const path = require("path");
 
 const cli = require("./src/cli");
 const watcher = require("./src/watcher");
-const { syncSite } = require("./sync-site");
+const { syncSite } = require("./setup-site");
 
 const agentMdContent = fs.readFileSync(path.join(__dirname, "Agent.md"), "utf-8");
 
