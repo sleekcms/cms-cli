@@ -14,7 +14,7 @@ const {
     parseFilePath,
     parseModelFilePath,
     parseContentRecordFilePath,
-} = require("../sync-site");
+} = require("../setup-site");
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -257,7 +257,7 @@ test("syncSite: second run pushes local edits and skips unchanged files", async 
     });
 });
 
-test("syncSite: server-deleted templates are removed locally", async (t) => {
+test("syncSite: server-deleted templates are NOT removed on incremental sync (push-only)", async (t) => {
     const origFetch = global.fetch;
     t.after(() => { global.fetch = origFetch; });
 
@@ -274,11 +274,12 @@ test("syncSite: server-deleted templates are removed locally", async (t) => {
         const ws = first.viewsDir;
         assert.ok(await fs.pathExists(path.join(ws, "pages/about.ejs")));
 
-        // Simulate server-side delete
+        // Simulate server-side delete — but incremental sync only pushes, so the
+        // local file is NOT removed. Re-run setup-site to re-pull from server.
         templates = [{ key: "home", type: "PAGE", code: "h" }];
         await syncSite({ token: "tok", viewsDir: ws });
 
-        assert.equal(await fs.pathExists(path.join(ws, "pages/about.ejs")), false);
+        assert.ok(await fs.pathExists(path.join(ws, "pages/about.ejs")));
         assert.ok(await fs.pathExists(path.join(ws, "pages/home.ejs")));
     });
 });
