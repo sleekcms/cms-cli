@@ -24,8 +24,6 @@ Use it whenever the user asks you to:
 
 If the user provides a SleekCMS auth token (or `SLEEKCMS_TOKEN` is in the environment), assume they want this skill.
 
----
-
 # Operational workflow
 
 ## 1. Install script dependencies (once per session)
@@ -84,8 +82,6 @@ node <skill-dir>/scripts/sync-site.js --flush
 ```
 
 This deletes `.cache/state.json` and treats the next run as a first run. The token cache is preserved.
-
----
 
 # Authoring reference
 
@@ -518,8 +514,6 @@ Template:
 <% } %>
 ```
 
----
-
 # Rules for AI
 
 1. Include CSS/JS files via **`link()`** and **`script()`** — never raw `<link>` or `<script>` tags in templates.
@@ -537,8 +531,6 @@ Template:
 13. `.cache/` is the script's state, not part of the site. Don't edit or commit it.
 14. Re-running `setup-site` or `sync-site` is safe and idempotent — if nothing changed, nothing is pushed.
 15. One token = one workspace. The token cached in a workspace can't be swapped — point a different token at a different `--path` instead.
-
----
 
 # CLI reference
 
