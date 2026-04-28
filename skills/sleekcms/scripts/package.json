@@ -5,6 +5,7 @@
   "private": true,
   "main": "sync-site.js",
   "bin": {
+    "setup-site": "setup-site.js",
     "sync-site": "sync-site.js"
   },
   "dependencies": {

@@ -579,20 +579,22 @@ module.exports = {
 if (require.main === module) {
     program
         .name("sync-site")
-        .description("Sync a SleekCMS site to/from a local workspace.")
-        .requiredOption("-t, --token <token>", "API authentication token")
-        .option("-p, --path <path>", "Parent directory (workspace slug created inside)")
-        .option("-d, --dir <dir>", "Explicit workspace directory (overrides --path)")
-        .option("-e, --env <env>", "Environment (localhost, development, production)")
+        .description("Incremental sync for an existing SleekCMS workspace. Reads the token from <workspace>/.cache/token (created by setup-site).")
+        .option("-d, --dir <dir>", "Workspace directory (default: current directory)")
+        .option("--flush", "Discard the local cache and re-pull all files from the server")
         .parse(process.argv);
 
     const opts = program.opts();
-    syncSite({
-        token: opts.token,
-        path: opts.path,
-        viewsDir: opts.dir,
-        env: opts.env,
-    })
+    const viewsDir = path.resolve(opts.dir || process.cwd());
+    const tokenPath = path.join(viewsDir, ".cache", "token");
+
+    if (!fs.existsSync(tokenPath)) {
+        console.error(`❌ No token found at ${tokenPath}. Run setup-site first to initialize this workspace.`);
+        process.exit(1);
+    }
+    const token = fs.readFileSync(tokenPath, "utf-8").trim();
+
+    syncSite({ token, viewsDir, flush: opts.flush })
         .then(({ viewsDir, site, isFirstRun, pushed, pulled }) => {
             console.log(
                 `\n✅ Sync complete for "${site.name}" at ${viewsDir} ` +
