@@ -52,6 +52,8 @@ Examples:
 /content/pages/<key>/<slug>.json   Content for one item of a collection page (<key> ends with [])
 /content/entries/<key>.json        Content for a single entry (object)
 /content/entries/<key>[].json      Content for a collection entry (array of objects; <key>[] matches the model filename)
+
+/images.json                       Site-level reusable images (handle → shortcut)
 ```
 
 > **Tailwind**: Creating `/css/tailwind.css` enables Tailwind. It is compiled and injected automatically — do NOT add it via `link()`.
@@ -173,7 +175,7 @@ How values in content JSON map to the types declared in the model:
 | `date` | `"YYYY-MM-DD"` string |
 | `datetime` | ISO 8601 string |
 | `time` | `"HH:mm"` string |
-| `image` | Either a resolved `{ "url": "...", "alt": "..." }` object, **or** a shortcut string `"<source>:<search>"` (e.g., `"pexels:doctor"` , `"url:https://picsum.photos/200.jpg"`, etc). Supported sources: `unsplash`, `pexels`, `pixabay`, `iconify`, `url`. On save, the sync engine resolves the shortcut/link to a full image object automatically. |
+| `image` | Either a resolved `{ "url": "...", "alt": "..." }` object, **or** a shortcut string `"<source>:<search>"` (e.g., `"pexels:doctor"`, `"url:https://picsum.photos/200.jpg"`, `"cms:logo"`). Supported sources: `unsplash`, `pexels`, `pixabay`, `iconify`, `url`, `cms` (reuses an image declared in `/images.json` by handle). On save, the sync engine resolves the shortcut/link to a full image object automatically. |
 | `video` | `{ "url": "...", "embed": "..." }` |
 | `json` | Object or array |
 | `sheet` | Array of arrays |
@@ -203,6 +205,20 @@ The content file at `content/pages/about.json`:
 ```
 
 Here `image` uses the shortcut form — on save, the sync engine replaces it with a real image object (`{ "url": "...", "alt": "..." }`). Write the object form directly when you have a specific asset URL.
+
+### Reusable images (`/images.json`)
+
+For images used in more than one place (logos, recurring icons, hero art), declare them once in `/images.json` as a flat map of `handle → shortcut` using the same shortcut convention as `image` fields:
+
+```json
+{
+    "logo": "url:https://cdn.example.com/logo.svg",
+    "hero": "pexels:mountain sunrise",
+    "apple-icon": "iconify:mdi:apple"
+}
+```
+
+Then reference any of them from any content `image` field with `"cms:<handle>"` (e.g., `"cms:logo"`). The sync engine resolves it to the full image object on save. Templates can also fetch the resolved object directly via `getImage('<handle>')`.
 
 ---
 
@@ -466,7 +482,7 @@ Template:
 6. Fields in a content JSON file must match the keys defined in the corresponding `.model`. Adding a new field requires updating the `.model` first.
 7. Collection page items each live in their own file under `content/pages/<key>/<slug>.json` — the collection key already includes `[]` (e.g., `content/pages/blog[]/my-post.json`). The `<slug>` filename is the URL segment; renaming the file renames the URL.
 8. **Collection key suffix `[]` is mandatory and must appear on every related file.** For a collection model (pages or entries — e.g., `blog`, `testimonials`, `authors`), the key `<name>[]` is part of the filename on the model, template, **and** content JSON: `models/entries/testimonials[].model`, `entries/testimonials[].ejs`, `content/entries/testimonials[].json` (array). Same rule for collection pages: `models/pages/blog[].model`, `pages/blog[].ejs`, and one file per slug under `content/pages/blog[]/<slug>.json`. Never drop the `[]` — files without it are treated as singles and will not resolve.
-9. For `image` fields in content JSON, prefer the shortcut form `"<source>:<search>"` (sources: `unsplash`, `pexels`, `pixabay`, `iconify`) — e.g., `"pexels:doctor"`. The sync engine resolves it to a full `{ url, alt }` object on save. Only write the object form when you have a specific asset URL.
+9. For `image` fields in content JSON, prefer the shortcut form `"<source>:<search>"` (sources: `unsplash`, `pexels`, `pixabay`, `iconify`) — e.g., `"pexels:doctor"`. The sync engine resolves it to a full `{ url, alt }` object on save. Only write the object form when you have a specific asset URL. When the same image is reused across pages (logos, shared icons, recurring art), declare it once in `/images.json` and reference it via `"cms:<handle>"`.
 10. Always create RSS feed for blogs and link them in meta so it is discoverable. Use "rss.xml" as the key.
 11. Make the sites extremely SEO friendly and sharing friendly
 
