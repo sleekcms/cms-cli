@@ -9,6 +9,7 @@
  */
 
 const fs = require("fs-extra");
+const os = require("os");
 const path = require("path");
 const JSON5 = require("json5");
 const { program } = require("commander");
@@ -586,9 +587,10 @@ if (require.main === module) {
         .parse(process.argv);
 
     const opts = program.opts();
+    const basePath = opts.dir || path.join(os.homedir(), ".sleekcms");
     syncSite({
         token: opts.token,
-        path: opts.dir || ".",
+        path: basePath,
         env: opts.env,
     })
         .then(({ viewsDir, site, isFirstRun, pulled }) => {
