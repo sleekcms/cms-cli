@@ -69,9 +69,6 @@ async function initConfig() {
     ENV = (tokenParts[2] || options.env || "production").toLowerCase();
 
     let customPath = options.path;
-    if (!customPath) {
-        customPath = await cli.prompt("Enter workspace folder path (or press Enter for current directory): ");
-    }
     if (customPath && customPath.startsWith("~")) {
         customPath = path.join(require("os").homedir(), customPath.slice(1));
     }

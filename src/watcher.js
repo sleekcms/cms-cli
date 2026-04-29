@@ -8,7 +8,8 @@
  */
 
 const chokidar = require("chokidar");
-const { DEBOUNCE_DELAY, ALLOW_CONTENT_UPDATES, ALLOW_MODEL_UPDATES } = require("./config");
+
+const DEBOUNCE_DELAY = 5000;
 
 let watcher = null;
 let isShuttingDown = false;
@@ -64,8 +65,6 @@ function monitorFiles() {
             /AGENT\.md$/,
             /CLAUDE\.md$/,
             /\.sleekcms\//,
-            ...(!ALLOW_CONTENT_UPDATES ? [/\/content\//] : []),
-            ...(!ALLOW_MODEL_UPDATES ? [/\/models\//] : []),
         ],
     })
         .on("change", scheduleSync)

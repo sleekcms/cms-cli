@@ -4,11 +4,7 @@
  */
 
 const DEBOUNCE_DELAY = 5000;
-const ALLOW_MODEL_UPDATES = true;
-const ALLOW_CONTENT_UPDATES = true;
 
 module.exports = {
     DEBOUNCE_DELAY,
-    ALLOW_MODEL_UPDATES,
-    ALLOW_CONTENT_UPDATES,
 };

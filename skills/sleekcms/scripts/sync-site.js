@@ -38,9 +38,6 @@ const TYPE_CONFIG = {
     BASE:  { dir: 'layouts', ext: '.ejs', noModel: true },
 };
 
-const ALLOW_MODEL_UPDATES = true;
-const ALLOW_CONTENT_UPDATES = true;
-
 // ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
@@ -75,6 +72,8 @@ function makeApi(token, env) {
         saveTemplate:        (key, type, code)  => request(apiBase, token, "POST", "/save_template", { key, type, code: code || "" }),
         saveModel:           (key, type, shape) => request(apiBase, token, "POST", "/save_model",    { key, type, shape: shape || "" }),
         saveRecord:          (key, type, item)  => request(apiBase, token, "POST", "/save_record",   { key, type, item }),
+        fetchImages:         ()                 => request(apiBase, token, "GET",  "/get_images"),
+        saveImages:          (images)           => request(apiBase, token, "POST", "/save_images",   images),
     };
 }
 
@@ -179,13 +178,14 @@ function cachePaths(viewsDir) {
 async function loadCache(viewsDir) {
     const { state } = cachePaths(viewsDir);
     if (!(await fs.pathExists(state))) {
-        return { fileMap: {}, modelMap: {}, contentRecordMap: {}, siteId: null, empty: true };
+        return { fileMap: {}, modelMap: {}, contentRecordMap: {}, imagesJson: null, siteId: null, empty: true };
     }
     const data = await fs.readJson(state);
     return {
         fileMap:          data.fileMap          || {},
         modelMap:         data.modelMap         || {},
         contentRecordMap: data.contentRecordMap || {},
+        imagesJson:       data.imagesJson       || null,
         siteId:           data.siteId           || null,
         empty: false,
     };
@@ -199,6 +199,7 @@ async function saveCache(viewsDir, cache) {
         fileMap: cache.fileMap,
         modelMap: cache.modelMap,
         contentRecordMap: cache.contentRecordMap,
+        imagesJson: cache.imagesJson || null,
     }, { spaces: 2 });
 }
 
@@ -328,8 +329,8 @@ async function walkFiles(viewsDir) {
 }
 
 /**
- * Push local edits. Order is strict and sequential: models → templates → content.
- * Models first because templates and content may reference model shapes.
+ * Push local edits. Order is strict and sequential: images → models → templates → content.
+ * Images first, then models (because templates and content may reference model shapes).
  *
  * Cheap-skip: if the file's mtime matches the cached mtime, treat it as
  * unchanged without reading the file.
@@ -343,11 +344,9 @@ async function pushLocalChanges(viewsDir, cache, api) {
 
     for (const rel of localFiles) {
         if (rel.startsWith("models/")) {
-            if (!ALLOW_MODEL_UPDATES) continue;
             const parsed = parseModelFilePath(rel);
             if (parsed) modelFiles.push({ rel, parsed });
         } else if (rel.startsWith("content/")) {
-            if (!ALLOW_CONTENT_UPDATES) continue;
             const parsed = parseContentRecordFilePath(rel);
             if (parsed) contentFiles.push({ rel, parsed });
         } else {
@@ -357,6 +356,41 @@ async function pushLocalChanges(viewsDir, cache, api) {
     }
 
     let pushed = 0;
+
+    // --- Images ---
+    const imagesPath = path.join(viewsDir, "images.json");
+    if (await fs.pathExists(imagesPath)) {
+        const stat = await fs.stat(imagesPath);
+        const prior = cache.imagesJson;
+        if (!prior || prior.mtimeMs !== stat.mtimeMs) {
+            let images;
+            try {
+                images = JSON.parse(await fs.readFile(imagesPath, "utf-8"));
+            } catch {
+                console.error("❌ Invalid JSON in images.json");
+            }
+            if (images !== undefined) {
+                if (prior && JSON.stringify(images) === JSON.stringify(prior.data)) {
+                    cache.imagesJson = { ...prior, mtimeMs: stat.mtimeMs };
+                } else {
+                    try {
+                        const resp = await api.saveImages(images);
+                        let finalMtime = stat.mtimeMs;
+                        const currentStat = await fs.stat(imagesPath);
+                        if (currentStat.mtimeMs === stat.mtimeMs) {
+                            await fs.outputFile(imagesPath, JSON.stringify(resp, null, 2));
+                            finalMtime = (await fs.stat(imagesPath)).mtimeMs;
+                        }
+                        cache.imagesJson = { data: resp, mtimeMs: finalMtime };
+                        console.log("✅ Updated images");
+                        pushed++;
+                    } catch (err) {
+                        console.error("❌ Error saving images:", err.body || err.message);
+                    }
+                }
+            }
+        }
+    }
 
     // --- Models ---
     for (const { rel, parsed } of modelFiles) {
@@ -430,15 +464,19 @@ async function pushLocalChanges(viewsDir, cache, api) {
         }
         try {
             const resp = await api.saveRecord(parsed.key, parsed.type, item);
-            const receivedItem = resp.item ?? item;
+            console.log(`📨 save_record response (${rel}):`, resp);
+            let receivedItem = item;
+            if (resp.item !== undefined) {
+                receivedItem = resp.item;
+            } else if (typeof resp.content === "string") {
+                try { receivedItem = JSON5.parse(resp.content); } catch {}
+            }
             let finalMtime = stat.mtimeMs;
-            // Write server response back to file unless file was modified while save was in-flight
+            // Always write server response back to file unless file was modified while save was in-flight
             const currentStat = await fs.stat(full);
             if (currentStat.mtimeMs === stat.mtimeMs) {
-                if (JSON.stringify(receivedItem) !== JSON.stringify(item)) {
-                    await fs.outputFile(full, JSON.stringify(receivedItem, null, 2));
-                    finalMtime = (await fs.stat(full)).mtimeMs;
-                }
+                await fs.outputFile(full, JSON.stringify(receivedItem, null, 2));
+                finalMtime = (await fs.stat(full)).mtimeMs;
             }
             cache.contentRecordMap[rel] = { key: parsed.key, type: parsed.type, item: receivedItem, mtimeMs: finalMtime };
             console.log(`✅ ${prior ? "Updated" : "Created"} content record: ${rel}`);
@@ -520,39 +558,59 @@ async function pullServerState(viewsDir, cache, api) {
     }
 
     // --- Content records ---
-    if (ALLOW_CONTENT_UPDATES) {
-        try {
-            console.log("📥 Fetching content records...");
-            const records = await api.fetchContentRecords();
-            const newMap = {};
-            for (const r of records) {
-                const rel = getContentRecordFilePath(r.key, r.type);
-                if (!rel) continue;
-                const full = path.join(viewsDir, rel);
-                const content = JSON.stringify(r.item, null, 2);
-                const prior = cache.contentRecordMap[rel];
-                const priorContent = prior ? JSON.stringify(prior.item, null, 2) : null;
-                let mtimeMs = prior?.mtimeMs;
-                if (priorContent !== content) {
-                    await fs.outputFile(full, content);
-                    mtimeMs = (await fs.stat(full)).mtimeMs;
-                    pulled++;
-                } else if (mtimeMs == null) {
-                    try { mtimeMs = (await fs.stat(full)).mtimeMs; } catch {}
-                }
-                newMap[rel] = { key: r.key, type: r.type, item: r.item, mtimeMs };
+    try {
+        console.log("📥 Fetching content records...");
+        const records = await api.fetchContentRecords();
+        const newMap = {};
+        for (const r of records) {
+            const rel = getContentRecordFilePath(r.key, r.type);
+            if (!rel) continue;
+            const full = path.join(viewsDir, rel);
+            const content = JSON.stringify(r.item, null, 2);
+            const prior = cache.contentRecordMap[rel];
+            const priorContent = prior ? JSON.stringify(prior.item, null, 2) : null;
+            let mtimeMs = prior?.mtimeMs;
+            if (priorContent !== content) {
+                await fs.outputFile(full, content);
+                mtimeMs = (await fs.stat(full)).mtimeMs;
+                pulled++;
+            } else if (mtimeMs == null) {
+                try { mtimeMs = (await fs.stat(full)).mtimeMs; } catch {}
             }
-            for (const rel of Object.keys(cache.contentRecordMap)) {
-                if (!newMap[rel]) {
-                    try { await fs.unlink(path.join(viewsDir, rel)); } catch {}
-                    console.log(`🗑️  Removed content record (deleted on server): ${rel}`);
-                }
-            }
-            cache.contentRecordMap = newMap;
-            console.log(`✔️ Synced ${Object.keys(newMap).length} content record(s).`);
-        } catch (err) {
-            console.warn("⚠️ Could not fetch content records:", err.body || err.message);
+            newMap[rel] = { key: r.key, type: r.type, item: r.item, mtimeMs };
         }
+        for (const rel of Object.keys(cache.contentRecordMap)) {
+            if (!newMap[rel]) {
+                try { await fs.unlink(path.join(viewsDir, rel)); } catch {}
+                console.log(`🗑️  Removed content record (deleted on server): ${rel}`);
+            }
+        }
+        cache.contentRecordMap = newMap;
+        console.log(`✔️ Synced ${Object.keys(newMap).length} content record(s).`);
+    } catch (err) {
+        console.warn("⚠️ Could not fetch content records:", err.body || err.message);
+    }
+
+    // --- Images ---
+    try {
+        console.log("📥 Fetching images...");
+        const images = await api.fetchImages();
+        const imagesPath = path.join(viewsDir, "images.json");
+        const content = JSON.stringify(images, null, 2);
+        const prior = cache.imagesJson;
+        const priorContent = prior ? JSON.stringify(prior.data, null, 2) : null;
+        let mtimeMs = prior?.mtimeMs;
+        if (priorContent !== content) {
+            await fs.outputFile(imagesPath, content);
+            mtimeMs = (await fs.stat(imagesPath)).mtimeMs;
+            pulled++;
+        } else if (mtimeMs == null) {
+            try { mtimeMs = (await fs.stat(imagesPath)).mtimeMs; } catch {}
+        }
+        cache.imagesJson = { data: images, mtimeMs };
+        console.log("✔️ Synced images.");
+    } catch (err) {
+        console.warn("⚠️ Could not fetch images:", err.body || err.message);
     }
 
     return pulled;
