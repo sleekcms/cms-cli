@@ -230,7 +230,8 @@ async function checkAndWriteToken(viewsDir, token) {
  */
 function resolveViewsDir(basePath, site) {
     const slug = kebabCase(`${site.name.substr(0, 20)} ${site.id}`);
-    return basePath ? path.resolve(basePath, slug) : path.resolve(slug);
+    const base = basePath || path.join(os.homedir(), ".sleekcms");
+    return path.resolve(base, slug);
 }
 
 /**
