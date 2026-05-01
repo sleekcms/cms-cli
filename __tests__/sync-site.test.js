@@ -61,7 +61,7 @@ const BASE = "https://app.sleekcms.com/api";
 
 function defaultRoutes(overrides = {}) {
     return {
-        [`GET ${BASE}/template/site`]: async () => SITE,
+        [`GET ${BASE}/ai_tools/get_site`]: async () => SITE,
         [`GET ${BASE}/ai_tools/get_files`]: async () => [],
         ...overrides,
     };

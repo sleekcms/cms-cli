@@ -14,15 +14,9 @@ const path = require("path");
 const { program } = require("commander");
 
 const API_BASE_URLS = {
-    localhost:   "http://localhost:9000/api/ai_tools",
+    localhost:   "http://app.sleekcms.test/api/ai_tools",
     development: "https://app.sleekcms.dev/api/ai_tools",
     production:  "https://app.sleekcms.com/api/ai_tools",
-};
-
-const TEMPLATE_API_BASE_URLS = {
-    localhost:   "http://localhost:9000/api/template",
-    development: "https://app.sleekcms.dev/api/template",
-    production:  "https://app.sleekcms.com/api/template",
 };
 
 const SRC_DIRS = [
@@ -100,9 +94,8 @@ async function syncSite(opts) {
 
     const env = (opts.env || token.split("-")[2] || "production").toLowerCase();
     const apiBase = API_BASE_URLS[env] || API_BASE_URLS.production;
-    const tmplBase = TEMPLATE_API_BASE_URLS[env] || TEMPLATE_API_BASE_URLS.production;
 
-    const site = await request(tmplBase, token, "GET", "/site");
+    const site = await request(apiBase, token, "GET", "/get_site");
 
     const viewsDir = opts.viewsDir
         ? path.resolve(opts.viewsDir)
