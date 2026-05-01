@@ -161,6 +161,7 @@ async function pushLocalChanges(viewsDir, fileMap, apiBase, token) {
         if (prior && prior.mtimeMs === stat.mtimeMs) continue;
 
         const content = await fs.readFile(full, "utf-8");
+        if (!content.trim()) continue;
         changes.push({ rel, full, stat, content, prior });
     }
 
