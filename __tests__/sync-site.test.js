@@ -26,9 +26,9 @@ test("kebabCase lowercases and replaces spaces/underscores", () => {
 });
 
 test("getFilePath maps type+key to dir/key.ext", () => {
-    assert.equal(getFilePath("home", "PAGE"), "src/pages/home.ejs");
-    assert.equal(getFilePath("hero", "BLOCK"), "src/blocks/hero.ejs");
-    assert.equal(getFilePath("main", "CSS"), "src/css/main.css");
+    assert.equal(getFilePath("home", "PAGE"), "src/views/pages/home.ejs");
+    assert.equal(getFilePath("hero", "BLOCK"), "src/views/blocks/hero.ejs");
+    assert.equal(getFilePath("main", "CSS"), "src/public/css/main.css");
     assert.equal(getFilePath("x", "UNKNOWN"), null);
 });
 
@@ -46,9 +46,9 @@ test("getContentRecordFilePath", () => {
 });
 
 test("parseFilePath round-trips with getFilePath", () => {
-    assert.deepEqual(parseFilePath("src/pages/home.ejs"), { type: "PAGE", key: "home" });
-    assert.deepEqual(parseFilePath("src/css/main.css"), { type: "CSS", key: "main" });
-    assert.deepEqual(parseFilePath("src/blocks/nested/card.ejs"), { type: "BLOCK", key: "nested/card" });
+    assert.deepEqual(parseFilePath("src/views/pages/home.ejs"), { type: "PAGE", key: "home" });
+    assert.deepEqual(parseFilePath("src/public/css/main.css"), { type: "CSS", key: "main" });
+    assert.deepEqual(parseFilePath("src/views/blocks/nested/card.ejs"), { type: "BLOCK", key: "nested/card" });
     assert.equal(parseFilePath("unknown/x.ejs"), null);
     assert.equal(parseFilePath("orphan.ejs"), null);
 });
@@ -163,13 +163,39 @@ test("syncSite: first run creates workspace, pulls files, writes cache + aux", a
         const ws = result.viewsDir;
         assert.ok(ws.endsWith("demo-123"));
 
-        assert.equal(await fs.readFile(path.join(ws, "src/pages/home.ejs"), "utf-8"), "<h1>Home</h1>");
-        assert.equal(await fs.readFile(path.join(ws, "src/css/main.css"), "utf-8"), "body{}");
+        assert.equal(await fs.readFile(path.join(ws, "src/views/pages/home.ejs"), "utf-8"), "<h1>Home</h1>");
+        assert.equal(await fs.readFile(path.join(ws, "src/public/css/main.css"), "utf-8"), "body{}");
         assert.equal(await fs.readFile(path.join(ws, "src/models/pages/home.model"), "utf-8"), "{ title: string }");
         assert.equal(
             await fs.readFile(path.join(ws, "src/content/pages/home.json"), "utf-8"),
             JSON.stringify({ title: "Hello" }, null, 2)
         );
+
+        // Setup should create the full src scaffold, even for empty directories.
+        const requiredDirs = [
+            "src/views",
+            "src/views/pages",
+            "src/views/entries",
+            "src/views/blocks",
+            "src/views/layouts",
+            "src/public",
+            "src/public/js",
+            "src/public/css",
+            "src/models",
+            "src/models/pages",
+            "src/models/entries",
+            "src/models/blocks",
+            "src/content",
+            "src/content/pages",
+            "src/content/entries",
+            "src/content/blocks",
+            "src/content/js",
+            "src/content/css",
+            "src/content/layouts",
+        ];
+        for (const rel of requiredDirs) {
+            assert.ok(await fs.pathExists(path.join(ws, rel)), `missing directory: ${rel}`);
+        }
 
         // Aux files
         assert.equal(await fs.readFile(path.join(ws, "AGENT.md"), "utf-8"), "# Agent");
@@ -179,7 +205,7 @@ test("syncSite: first run creates workspace, pulls files, writes cache + aux", a
         // Cache + token
         const cache = await fs.readJson(path.join(ws, ".cache/state.json"));
         assert.equal(cache.siteId, 123);
-        assert.ok(cache.fileMap["src/pages/home.ejs"]);
+        assert.ok(cache.fileMap["src/views/pages/home.ejs"]);
         assert.ok(cache.modelMap["src/models/pages/home.model"]);
         assert.ok(cache.contentRecordMap["src/content/pages/home.json"]);
         assert.equal((await fs.readFile(path.join(ws, ".cache/token"), "utf-8")).trim(), "tok-xyz-production");
@@ -227,7 +253,7 @@ test("syncSite: second run pushes local edits and skips unchanged files", async 
         const ws = first.viewsDir;
 
         // Edit template and model locally
-        await fs.writeFile(path.join(ws, "src/pages/home.ejs"), "<h1>Edited</h1>");
+        await fs.writeFile(path.join(ws, "src/views/pages/home.ejs"), "<h1>Edited</h1>");
         await fs.writeFile(path.join(ws, "src/models/pages/home.model"), "{ title: string, extra: number }");
         // New content record
         await fs.outputFile(path.join(ws, "src/content/pages/home.json"), JSON.stringify({ title: "X" }));
@@ -272,15 +298,15 @@ test("syncSite: server-deleted templates are NOT removed on incremental sync (pu
     await withTempDir(async (tmp) => {
         const first = await syncSite({ token: "tok", path: tmp });
         const ws = first.viewsDir;
-        assert.ok(await fs.pathExists(path.join(ws, "src/pages/about.ejs")));
+        assert.ok(await fs.pathExists(path.join(ws, "src/views/pages/about.ejs")));
 
         // Simulate server-side delete — but incremental sync only pushes, so the
         // local file is NOT removed. Re-run setup-site to re-pull from server.
         templates = [{ key: "home", type: "PAGE", code: "h" }];
         await syncSite({ token: "tok", viewsDir: ws });
 
-        assert.ok(await fs.pathExists(path.join(ws, "src/pages/about.ejs")));
-        assert.ok(await fs.pathExists(path.join(ws, "src/pages/home.ejs")));
+        assert.ok(await fs.pathExists(path.join(ws, "src/views/pages/about.ejs")));
+        assert.ok(await fs.pathExists(path.join(ws, "src/views/pages/home.ejs")));
     });
 });
 
@@ -298,7 +324,7 @@ test("syncSite: template push skipped when no matching model exists", async (t) 
         const ws = first.viewsDir;
 
         // A PAGE template requires a model, but none exists in cache.
-        await fs.outputFile(path.join(ws, "src/pages/new.ejs"), "<h1>New</h1>");
+        await fs.outputFile(path.join(ws, "src/views/pages/new.ejs"), "<h1>New</h1>");
 
         const second = await syncSite({ token: "tok", viewsDir: ws });
         assert.equal(second.pushed, 0);

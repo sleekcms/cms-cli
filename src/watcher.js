@@ -57,17 +57,20 @@ function scheduleSync() {
 }
 
 function watchTargets(rootDir) {
-    return [path.join(rootDir, "src", "**", "*")];
+    return [path.join(rootDir, "src")];
 }
 
 function monitorFiles() {
+    const watchedFolder = path.join(viewsDir, "src");
+    console.log(`👀 Watching folder: ${watchedFolder}`);
+
     watcher = chokidar.watch(watchTargets(viewsDir), {
         persistent: true,
         ignoreInitial: true,
     })
-        .on("change", (path) => { console.log(`📝 Changed: ${path}`); scheduleSync(); })
-        .on("add", (path) => { console.log(`➕ Added: ${path}`); scheduleSync(); })
-        .on("unlink", (path) => { console.log(`🗑️  Deleted: ${path}`); scheduleSync(); });
+        .on("change", (filePath) => { scheduleSync(); })
+        .on("add", (filePath) => { scheduleSync(); })
+        .on("unlink", (filePath) => { scheduleSync(); });
 }
 
 async function stopWatching() {

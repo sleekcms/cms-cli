@@ -9,7 +9,6 @@
  */
 
 const fs = require("fs-extra");
-const os = require("os");
 const path = require("path");
 const JSON5 = require("json5");
 const { program } = require("commander");
@@ -268,8 +267,7 @@ async function checkAndWriteToken(viewsDir, token) {
  */
 function resolveViewsDir(basePath, site) {
     const slug = kebabCase(`${site.name.substr(0, 20)} ${site.id}`);
-    const base = basePath || path.join(os.homedir(), ".sleekcms");
-    return path.resolve(base, slug);
+    return basePath ? path.resolve(basePath, slug) : path.resolve(slug);
 }
 
 /**
@@ -512,7 +510,7 @@ async function pushLocalChanges(viewsDir, cache, api) {
             const resp = await api.saveRecord(parsed.key, parsed.type, item);
             const receivedItem = resp.item ?? item;
             let finalMtime = stat.mtimeMs;
-            // Write server response back to file unless file was modified while save was in-flight
+            // Always write server response back to file unless file was modified while save was in-flight
             const currentStat = await fs.stat(full);
             if (currentStat.mtimeMs === stat.mtimeMs) {
                 await fs.outputFile(full, JSON.stringify(receivedItem, null, 2));
@@ -635,7 +633,6 @@ async function pullServerState(viewsDir, cache, api) {
     try {
         console.log("📥 Fetching images...");
         const images = await api.fetchImages();
-        console.log("🖼️ Fetched images:", images);
         const imagesPath = path.join(viewsDir, WORKSPACE_SRC_DIR, "images.json");
         const content = JSON.stringify(images, null, 2);
         const prior = cache.imagesJson;
@@ -677,27 +674,27 @@ module.exports = {
 
 if (require.main === module) {
     program
-        .name("setup-site")
-        .description("Initialize a SleekCMS workspace: pull all files and persist the auth token for future syncs.")
-        .requiredOption("-t, --token <token>", "SleekCMS CLI auth token")
-        .option("-d, --dir <dir>", "Parent directory; workspace is created as a slug-named subfolder (default: current directory)")
-        .option("-e, --env <env>", "Environment override (localhost, development, production)")
+        .name("sync-site")
+        .description("Incremental sync for an existing SleekCMS workspace. Run from the workspace directory (created by setup-site). Reads token and state from .cache/.")
+        .option("--flush", "Discard the local cache and re-pull all files from the server")
         .parse(process.argv);
 
     const opts = program.opts();
-    const basePath = opts.dir || path.join(os.homedir(), ".sleekcms");
-    syncSite({
-        token: opts.token,
-        path: basePath,
-        env: opts.env,
-    })
-        .then(({ viewsDir, site, isFirstRun, pulled }) => {
-            if (isFirstRun) {
-                console.log(`\n✅ Workspace initialized for "${site.name}" at ${viewsDir} (pulled ${pulled} file(s)).`);
-            } else {
-                console.log(`\n✅ Workspace already initialized for "${site.name}" at ${viewsDir}.`);
-            }
-            console.log(`\nNext: cd ${viewsDir}  →  edit files  →  run sync-site`);
+    const viewsDir = path.resolve(process.cwd());
+    const tokenPath = path.join(viewsDir, ".cache", "token");
+
+    if (!fs.existsSync(tokenPath)) {
+        console.error(`❌ No token found at ${tokenPath}. Run setup-site first to initialize this workspace.`);
+        process.exit(1);
+    }
+    const token = fs.readFileSync(tokenPath, "utf-8").trim();
+
+    syncSite({ token, viewsDir, flush: opts.flush })
+        .then(({ viewsDir, site, isFirstRun, pushed, pulled }) => {
+            console.log(
+                `\n✅ Sync complete for "${site.name}" at ${viewsDir} ` +
+                `(${isFirstRun ? "first run" : "incremental"}, pushed=${pushed}, pulled=${pulled}).`
+            );
         })
         .catch(err => {
             console.error("❌", err.body || err.message);
