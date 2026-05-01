@@ -29,41 +29,19 @@ const TEMPLATE_API_BASE_URLS = {
     production:  "https://app.sleekcms.com/api/template",
 };
 
-const TREE = {
-    src: {
-        views: { blocks: "ejs", entries: "ejs", pages: "ejs", layouts: "ejs" },
-        models: { blocks: "model", entries: "model", pages: "model" },
-        content: { pages: "json", entries: "json", images: true },
-        public: { js: "js", css: "css" },
-    },
-};
-
-const PATH_ROOTS = Object.fromEntries(
-    Object.keys(TREE.src).map((kind) => [kind, `src/${kind}`])
-);
-
-const MODEL_TYPES = new Set(Object.keys(TREE.src.models));
-const CONTENT_TYPES = new Set(Object.keys(TREE.src.content).filter((bucket) => bucket !== "images"));
-const IMAGES_FILE = `${PATH_ROOTS.content}/images.json`;
-const TREE_TYPE_BY_API_TYPE = {
-    BASE: "layouts",
-    BLOCK: "blocks",
-    ENTRY: "entries",
-    PAGE: "pages",
-};
-const API_TYPE_BY_TREE_TYPE = {
-    blocks: "BLOCK",
-    css: "CSS",
-    entries: "ENTRY",
-    images: "IMAGES",
-    js: "JS",
-    layouts: "BASE",
-    pages: "PAGE",
-};
-const FILE_KIND_BY_TYPE = {
-    views: ["blocks", "entries", "layouts", "pages"],
-    public: ["js", "css"],
-};
+const SRC_DIRS = [
+    "src/views/blocks",
+    "src/views/entries",
+    "src/views/pages",
+    "src/views/layouts",
+    "src/models/blocks",
+    "src/models/entries",
+    "src/models/pages",
+    "src/content/pages",
+    "src/content/entries",
+    "src/public/js",
+    "src/public/css",
+];
 
 // ---------------------------------------------------------------------------
 // HTTP
@@ -92,87 +70,17 @@ function makeApi(token, env) {
     const apiBase = API_BASE_URLS[env] || API_BASE_URLS.production;
     const tmplBase = TEMPLATE_API_BASE_URLS[env] || TEMPLATE_API_BASE_URLS.production;
     return {
-        fetchSite:           ()     => request(tmplBase, token, "GET",  "/site"),
-        fetchTemplates:      ()     => request(apiBase,  token, "GET",  "/get_templates"),
-        fetchModels:         ()     => request(apiBase,  token, "GET",  "/get_models"),
-        fetchContentRecords: ()     => request(apiBase,  token, "GET",  "/get_records"),
-        fetchImages:         ()     => request(apiBase,  token, "GET",  "/get_images"),
-        saveTemplate:        (item) => request(apiBase,  token, "POST", "/save_template", item),
-        saveModel:           (item) => request(apiBase,  token, "POST", "/save_model",    item),
-        saveRecord:          (item) => request(apiBase,  token, "POST", "/save_record",   item),
-        saveImages:          (item) => request(apiBase,  token, "POST", "/save_images",   item),
+        fetchSite:  ()      => request(tmplBase, token, "GET",  "/site"),
+        fetchFiles: ()      => request(apiBase,  token, "GET",  "/get_files"),
+        saveFiles:  (files) => request(apiBase,  token, "POST", "/save_files", files),
     };
-}
-
-// ---------------------------------------------------------------------------
-// Paths
-// ---------------------------------------------------------------------------
-
-const kebabCase = (str) => str.replace(/[\s_]+/g, "-").toLowerCase();
-
-
-function getPathConfig(kind, type) {
-    const bucket = TREE_TYPE_BY_API_TYPE[String(type || "")] || String(type || "").toLowerCase();
-    const ext = bucket ? TREE.src[kind]?.[bucket] : null;
-    return bucket && ext ? { bucket, ext } : null;
-}
-
-function buildPath(kind, type, key) {
-    const config = getPathConfig(kind, type);
-    if (!config || !key) return null;
-    return `${PATH_ROOTS[kind]}/${config.bucket}/${key}.${config.ext}`;
-}
-
-function findPathMatch(filePath) {
-    if (filePath === IMAGES_FILE) {
-        return { kind: "content", type: "images", key: "images", ext: "json", path: filePath };
-    }
-
-    const matches = filePath.match(/^src\/([^/]+)\/([^/]+)\/(.+)\.([^/.]+)$/);
-    if (!matches) return null;
-
-    const [, kind, bucket, key, ext] = matches;
-    if (TREE.src[kind]?.[bucket] !== ext) return null;
-
-    if (bucket === "images") return null;
-
-    return { kind, type: bucket, key, ext, path: filePath };
-}
-
-
-function getFilePath(key, type) {
-    const treeType = TREE_TYPE_BY_API_TYPE[String(type || "")] || String(type || "").toLowerCase();
-    const kind = Object.entries(FILE_KIND_BY_TYPE).find(([, types]) => types.includes(treeType))?.[0];
-    return kind ? buildPath(kind, type, key) : null;
-}
-
-function getModelFilePath(key, type) {
-    return buildPath("models", type, key);
-}
-
-function getContentRecordFilePath(key, type) {
-    return buildPath("content", type, key);
-}
-
-function validatePath(filePath) {
-    const parsed = findPathMatch(filePath);
-    if (!parsed) {
-        throw new Error(`Invalid path "${filePath}": does not match the configured TREE`);
-    }
-    return parsed;
-}
-
-function parsePath(filePath) {
-    try {
-        return validatePath(filePath);
-    } catch {
-        return null;
-    }
 }
 
 // ---------------------------------------------------------------------------
 // Auxiliary files
 // ---------------------------------------------------------------------------
+
+const kebabCase = (str) => str.replace(/[\s_]+/g, "-").toLowerCase();
 
 async function writeVSCodeSettings(viewsDir) {
     const settings = {
@@ -210,29 +118,18 @@ function cachePaths(viewsDir) {
 }
 
 async function ensureSourceStructure(viewsDir) {
-    const requiredDirs = [
-        "src",
-        ...Object.keys(PATH_ROOTS).map((kind) => PATH_ROOTS[kind]),
-        ...Object.entries(TREE.src).flatMap(([kind, bucketMap]) => Object.entries(bucketMap)
-            .filter(([, ext]) => ext !== true)
-            .map(([bucket]) => `${PATH_ROOTS[kind]}/${bucket}`)),
-    ];
-
-    await Promise.all([...new Set(requiredDirs)].map((dir) => fs.ensureDir(path.join(viewsDir, dir))));
+    await Promise.all(SRC_DIRS.map((dir) => fs.ensureDir(path.join(viewsDir, dir))));
 }
 
 async function loadCache(viewsDir) {
     const { state } = cachePaths(viewsDir);
     if (!(await fs.pathExists(state))) {
-        return { fileMap: {}, modelMap: {}, contentRecordMap: {}, imagesJson: null, siteId: null, empty: true };
+        return { fileMap: {}, siteId: null, empty: true };
     }
     const data = await fs.readJson(state);
     return {
-        fileMap:          data.fileMap          || {},
-        modelMap:         data.modelMap         || {},
-        contentRecordMap: data.contentRecordMap || {},
-        imagesJson:       data.imagesJson       || null,
-        siteId:           data.siteId           || null,
+        fileMap: data.fileMap || {},
+        siteId:  data.siteId  || null,
         empty: false,
     };
 }
@@ -243,9 +140,6 @@ async function saveCache(viewsDir, cache) {
     await fs.writeJson(state, {
         siteId: cache.siteId,
         fileMap: cache.fileMap,
-        modelMap: cache.modelMap,
-        contentRecordMap: cache.contentRecordMap,
-        imagesJson: cache.imagesJson || null,
     }, { spaces: 2 });
 }
 
@@ -279,18 +173,6 @@ function resolveViewsDir(basePath, site) {
     return path.resolve(base, slug);
 }
 
-/**
- * Main sync entrypoint.
- *
- * @param {object} opts
- * @param {string} opts.token
- * @param {string} [opts.path]         Parent directory. Workspace is created as a slug-named subfolder.
- * @param {string} [opts.viewsDir]     Explicit workspace dir (overrides `path`).
- * @param {string} [opts.env]
- * @param {string} [opts.agentMd]      Agent.md content; written on first run if provided.
- * @param {boolean} [opts.flush]       Delete the local cache before syncing, forcing a full re-pull from server.
- * @returns {Promise<{viewsDir, site, fileMap, modelMap, contentRecordMap, isFirstRun, pushed, pulled}>}
- */
 async function syncSite(opts) {
     const token = (opts.token || "").trim();
     if (!token) throw new Error("syncSite: token is required");
@@ -299,7 +181,6 @@ async function syncSite(opts) {
     const env = (opts.env || tokenParts[2] || "production").toLowerCase();
     const api = makeApi(token, env);
 
-    // Fetch site info up-front so we can resolve viewsDir.
     const site = await api.fetchSite();
 
     const viewsDir = opts.viewsDir
@@ -322,15 +203,12 @@ async function syncSite(opts) {
     let pushed = 0;
     let pulled = 0;
 
-    // Pull only on first run — after that, the cache is our source of truth
-    // for server state and we only push local changes.
     if (isFirstRun) {
         pulled = await pullServerState(viewsDir, cache, api);
     } else {
         pushed = await pushLocalChanges(viewsDir, cache, api);
     }
 
-    // -------- AUX FILES (first run only) -----------------------------------
     if (isFirstRun) {
         if (opts.agentMd) await writeAgentFiles(viewsDir, opts.agentMd);
         await writeVSCodeSettings(viewsDir);
@@ -342,8 +220,6 @@ async function syncSite(opts) {
         viewsDir,
         site,
         fileMap: cache.fileMap,
-        modelMap: cache.modelMap,
-        contentRecordMap: cache.contentRecordMap,
         isFirstRun,
         pushed,
         pulled,
@@ -380,100 +256,68 @@ async function walkFiles(viewsDir) {
     return out;
 }
 
-const PUSH_RESOURCES = [
-    {
-        name: "images",
-        label: "images",
-        matches: (parsed) => parsed.type === "images",
-        getPrior: (cache) => cache.imagesJson,
-        setCache: (cache, _rel, entry) => { cache.imagesJson = entry; },
-        save: (api, item) => api.saveImages(item),
-        successMessage: () => "✅ Updated images",
-    },
-    {
-        name: "model",
-        label: "model",
-        matches: (parsed) => parsed.kind === "models",
-        getPrior: (cache, rel) => cache.modelMap[rel],
-        setCache: (cache, rel, entry) => { cache.modelMap[rel] = entry; },
-        save: (api, item) => api.saveModel(item),
-    },
-    {
-        name: "template",
-        label: "template",
-        matches: (parsed) => parsed.kind === "views" || parsed.kind === "public",
-        getPrior: (cache, rel) => cache.fileMap[rel],
-        setCache: (cache, rel, entry) => { cache.fileMap[rel] = entry; },
-        save: (api, item) => api.saveTemplate(item),
-    },
-    {
-        name: "content record",
-        label: "content record",
-        matches: (parsed) => parsed.kind === "content" && parsed.type !== "images",
-        getPrior: (cache, rel) => cache.contentRecordMap[rel],
-        setCache: (cache, rel, entry) => { cache.contentRecordMap[rel] = entry; },
-        save: (api, item) => api.saveRecord(item),
-    },
-];
-
-async function pushLocalResource(viewsDir, cache, api, resource, { rel, parsed }) {
-    const full = path.join(viewsDir, rel);
-    const prior = resource.getPrior(cache, rel);
-    const stat = await fs.stat(full);
-    if (prior && prior.mtimeMs === stat.mtimeMs) return 0;
-
-    const readContent = resource.readContent || ((file) => fs.readFile(file, "utf-8"));
-    const content = await readContent(full, rel);
-    if (content == null) return 0;
-
-    if (prior && content === prior.content) {
-        resource.setCache(cache, rel, { ...prior, mtimeMs: stat.mtimeMs });
-        return 0;
-    }
-
-    const apiType = API_TYPE_BY_TREE_TYPE[parsed.type] || parsed.type;
-    try {
-        const resp = await resource.save(api, { key: parsed.key, type: apiType, content });
-        const finalContent = resp.content ?? content;
-        let finalMtime = stat.mtimeMs;
-        const currentStat = await fs.stat(full);
-        if (currentStat.mtimeMs === stat.mtimeMs && finalContent !== content) {
-            await fs.outputFile(full, finalContent);
-            finalMtime = (await fs.stat(full)).mtimeMs;
-        }
-        resource.setCache(cache, rel, { key: parsed.key, type: apiType, content: finalContent, mtimeMs: finalMtime });
-        const message = resource.successMessage
-            ? resource.successMessage({ prior, rel })
-            : `✅ ${prior ? "Updated" : "Created"} ${resource.label}: ${rel}`;
-        console.log(message);
-        return 1;
-    } catch (err) {
-        console.error(`❌ Error saving ${resource.name}${resource.name === "images" ? "" : ` ${rel}`}:`, err.body || err.message);
-        return 0;
-    }
-}
-
 /**
- * Push local edits. Order is strict and sequential: images → models → templates → content.
- * Images first, then models (because templates and content may reference model shapes).
+ * Push local edits via the unified /save_files endpoint. The server enforces
+ * save order (images → models → templates → content).
  *
- * Cheap-skip: if the file's mtime matches the cached mtime, treat it as
- * unchanged without reading the file.
+ * Cheap-skip: file mtime matches cache → don't read.
+ * Content-skip: file content matches cache → just refresh cached mtime.
  */
 async function pushLocalChanges(viewsDir, cache, api) {
     const localFiles = await walkFiles(viewsDir);
+    const changes = [];
 
-    const localResources = localFiles
-        .map((rel) => ({ rel, parsed: parsePath(rel) }))
-        .filter((item) => item.parsed);
+    for (const rel of localFiles) {
+        const full = path.join(viewsDir, rel);
+        const prior = cache.fileMap[rel];
+        const stat = await fs.stat(full);
+
+        if (prior && prior.mtimeMs === stat.mtimeMs) continue;
+
+        const content = await fs.readFile(full, "utf-8");
+
+        if (prior && content === prior.content) {
+            cache.fileMap[rel] = { content, mtimeMs: stat.mtimeMs };
+            continue;
+        }
+
+        changes.push({ rel, full, stat, content, prior });
+    }
+
+    if (changes.length === 0) return 0;
+
+    const payload = changes.map((c) => ({ path: c.rel, content: c.content }));
+
+    let results;
+    try {
+        results = await api.saveFiles(payload);
+    } catch (err) {
+        console.error("❌ Error saving files:", err.body || err.message);
+        return 0;
+    }
 
     let pushed = 0;
+    for (let i = 0; i < changes.length; i++) {
+        const c = changes[i];
+        const r = (results && results[i]) || {};
 
-    for (const resource of PUSH_RESOURCES) {
-        for (const item of localResources) {
-            if (!resource.matches(item.parsed)) continue;
-            pushed += await pushLocalResource(viewsDir, cache, api, resource, item);
+        if (r.error) {
+            console.error(`❌ Error saving ${c.rel}: ${r.error}`);
+            continue;
         }
+
+        const finalContent = r.content ?? c.content;
+        let finalMtime = c.stat.mtimeMs;
+
+        const currentStat = await fs.stat(c.full);
+        if (currentStat.mtimeMs === c.stat.mtimeMs && finalContent !== c.content) {
+            await fs.outputFile(c.full, finalContent);
+            finalMtime = (await fs.stat(c.full)).mtimeMs;
+        }
+
+        cache.fileMap[c.rel] = { content: finalContent, mtimeMs: finalMtime };
+        console.log(`✅ ${c.prior ? "Updated" : "Created"} ${c.rel}`);
+        pushed++;
     }
 
     return pushed;
@@ -483,94 +327,42 @@ async function pushLocalChanges(viewsDir, cache, api) {
 // Pull
 // ---------------------------------------------------------------------------
 
-async function pullItems(viewsDir, items, getPath, oldMap) {
-    const newMap = {};
-    let pulled = 0;
-    for (const item of items) {
-        const rel = getPath(item.key, item.type);
-        if (!rel) continue;
-        const full = path.join(viewsDir, rel);
-        const prior = oldMap[rel];
-        let mtimeMs = prior?.mtimeMs;
-        if (!prior || prior.content !== item.content) {
-            await fs.outputFile(full, item.content);
-            mtimeMs = (await fs.stat(full)).mtimeMs;
-            pulled++;
-        } else if (mtimeMs == null) {
-            try { mtimeMs = (await fs.stat(full)).mtimeMs; } catch {}
-        }
-        newMap[rel] = { key: item.key, type: item.type, content: item.content, mtimeMs };
-    }
-    return { newMap, pulled };
-}
-
-async function removeStale(viewsDir, oldMap, newMap, label) {
+async function removeStale(viewsDir, oldMap, newMap) {
     for (const rel of Object.keys(oldMap)) {
         if (!newMap[rel]) {
             try { await fs.unlink(path.join(viewsDir, rel)); } catch {}
-            console.log(`🗑️  Removed ${label} (deleted on server): ${rel}`);
+            console.log(`🗑️  Removed (deleted on server): ${rel}`);
         }
     }
 }
 
 async function pullServerState(viewsDir, cache, api) {
+    console.log("📥 Fetching files...");
+    const files = await api.fetchFiles();
+
+    const newFileMap = {};
     let pulled = 0;
 
-    // --- Templates ---
-    console.log("📥 Fetching templates...");
-    const templates = await api.fetchTemplates();
-    const { newMap: newFileMap, pulled: tPulled } = await pullItems(viewsDir, templates, getFilePath, cache.fileMap);
-    await removeStale(viewsDir, cache.fileMap, newFileMap, "template");
-    cache.fileMap = newFileMap;
-    pulled += tPulled;
-    console.log(`✔️ Synced ${templates.length} template(s).`);
+    for (const file of files) {
+        const full = path.join(viewsDir, file.path);
+        const prior = cache.fileMap[file.path];
 
-    // --- Models ---
-    try {
-        console.log("📥 Fetching models...");
-        const models = await api.fetchModels();
-        const { newMap: newModelMap, pulled: mPulled } = await pullItems(viewsDir, models, getModelFilePath, cache.modelMap);
-        await removeStale(viewsDir, cache.modelMap, newModelMap, "model");
-        cache.modelMap = newModelMap;
-        pulled += mPulled;
-        console.log(`✔️ Synced ${Object.keys(newModelMap).length} model(s).`);
-    } catch (err) {
-        console.warn("⚠️ Could not fetch models:", err.body || err.message);
-    }
-
-    // --- Content records ---
-    try {
-        console.log("📥 Fetching content records...");
-        const records = await api.fetchContentRecords();
-        const { newMap, pulled: rPulled } = await pullItems(viewsDir, records, getContentRecordFilePath, cache.contentRecordMap);
-        await removeStale(viewsDir, cache.contentRecordMap, newMap, "content record");
-        cache.contentRecordMap = newMap;
-        pulled += rPulled;
-        console.log(`✔️ Synced ${Object.keys(newMap).length} content record(s).`);
-    } catch (err) {
-        console.warn("⚠️ Could not fetch content records:", err.body || err.message);
-    }
-
-    // --- Images ---
-    try {
-        console.log("📥 Fetching images...");
-        const images = await api.fetchImages();
-        const imagesPath = path.join(viewsDir, IMAGES_FILE);
-        const prior = cache.imagesJson;
         let mtimeMs = prior?.mtimeMs;
-        if (!prior || prior.content !== images.content) {
-            await fs.outputFile(imagesPath, images.content);
-            mtimeMs = (await fs.stat(imagesPath)).mtimeMs;
+        if (!prior || prior.content !== file.content) {
+            await fs.outputFile(full, file.content);
+            mtimeMs = (await fs.stat(full)).mtimeMs;
             pulled++;
         } else if (mtimeMs == null) {
-            try { mtimeMs = (await fs.stat(imagesPath)).mtimeMs; } catch {}
+            try { mtimeMs = (await fs.stat(full)).mtimeMs; } catch {}
         }
-        cache.imagesJson = { key: images.key, type: images.type, content: images.content, mtimeMs };
-        console.log("✔️ Synced images.");
-    } catch (err) {
-        console.warn("⚠️ Could not fetch images:", err.body || err.message);
+
+        newFileMap[file.path] = { content: file.content, mtimeMs };
     }
 
+    await removeStale(viewsDir, cache.fileMap, newFileMap);
+    cache.fileMap = newFileMap;
+
+    console.log(`✔️ Synced ${files.length} file(s).`);
     return pulled;
 }
 
@@ -584,11 +376,6 @@ module.exports = {
     writeAgentFiles,
     writeVSCodeSettings,
     kebabCase,
-    getFilePath,
-    getModelFilePath,
-    getContentRecordFilePath,
-    validatePath,
-    parsePath,
 };
 
 if (require.main === module) {
