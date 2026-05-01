@@ -279,7 +279,7 @@ test("syncSite: second run pushes local edits and skips unchanged files", async 
         assert.equal(saved.templates.length, 1);
         assert.equal(saved.templates[0].content, "<h1>Edited</h1>");
         assert.equal(saved.records.length, 1);
-        assert.equal(saved.records[0].content, JSON.stringify({ title: "X" }, null, 2));
+        assert.equal(saved.records[0].content, JSON.stringify({ title: "X" }));
 
         // Third run with no local changes: nothing pushed
         saved.templates.length = 0;
@@ -319,7 +319,7 @@ test("syncSite: server-deleted templates are NOT removed on incremental sync (pu
     });
 });
 
-test("syncSite: template push skipped when no matching model exists", async (t) => {
+test("syncSite: template push does not require a matching model", async (t) => {
     const origFetch = global.fetch;
     t.after(() => { global.fetch = origFetch; });
 
@@ -332,11 +332,37 @@ test("syncSite: template push skipped when no matching model exists", async (t) 
         const first = await syncSite({ token: "tok", path: tmp });
         const ws = first.viewsDir;
 
-        // A PAGE template requires a model, but none exists in cache.
         await fs.outputFile(path.join(ws, "src/views/pages/new.ejs"), "<h1>New</h1>");
 
         const second = await syncSite({ token: "tok", viewsDir: ws });
-        assert.equal(second.pushed, 0);
-        assert.equal(saved.length, 0);
+        assert.equal(second.pushed, 1);
+        assert.equal(saved.length, 1);
+        assert.equal(saved[0].key, "new");
+        assert.equal(saved[0].type, "PAGE");
+    });
+});
+
+test("syncSite: images push uses images endpoint only", async (t) => {
+    const origFetch = global.fetch;
+    t.after(() => { global.fetch = origFetch; });
+
+    const saved = { images: [], records: [] };
+    global.fetch = makeFetchStub(defaultRoutes({
+        [`POST ${BASE}/ai_tools/save_images`]: async (body) => { saved.images.push(body); return { content: body.content }; },
+        [`POST ${BASE}/ai_tools/save_record`]: async (body) => { saved.records.push(body); return { content: body.content }; },
+    }));
+
+    await withTempDir(async (tmp) => {
+        const first = await syncSite({ token: "tok", path: tmp });
+        const ws = first.viewsDir;
+
+        await fs.outputFile(path.join(ws, "src/content/images.json"), JSON.stringify([{ url: "/hero.png" }]));
+
+        const second = await syncSite({ token: "tok", viewsDir: ws });
+        assert.equal(second.pushed, 1);
+        assert.equal(saved.images.length, 1);
+        assert.equal(saved.images[0].key, "images");
+        assert.equal(saved.images[0].type, "IMAGES");
+        assert.equal(saved.records.length, 0);
     });
 });

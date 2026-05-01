@@ -14,7 +14,6 @@
   "dependencies": {
     "chokidar": "^4.0.3",
     "commander": "^13.1.0",
-    "fs-extra": "^11.3.0",
-    "json5": "^2.2.3"
+    "fs-extra": "^11.3.0"
   }
 }

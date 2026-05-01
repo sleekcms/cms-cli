@@ -11,7 +11,6 @@
 const fs = require("fs-extra");
 const os = require("os");
 const path = require("path");
-const JSON5 = require("json5");
 const { program } = require("commander");
 
 // ---------------------------------------------------------------------------
@@ -381,6 +380,79 @@ async function walkFiles(viewsDir) {
     return out;
 }
 
+const PUSH_RESOURCES = [
+    {
+        name: "images",
+        label: "images",
+        matches: (parsed) => parsed.type === "images",
+        getPrior: (cache) => cache.imagesJson,
+        setCache: (cache, _rel, entry) => { cache.imagesJson = entry; },
+        save: (api, item) => api.saveImages(item),
+        successMessage: () => "✅ Updated images",
+    },
+    {
+        name: "model",
+        label: "model",
+        matches: (parsed) => parsed.kind === "models",
+        getPrior: (cache, rel) => cache.modelMap[rel],
+        setCache: (cache, rel, entry) => { cache.modelMap[rel] = entry; },
+        save: (api, item) => api.saveModel(item),
+    },
+    {
+        name: "template",
+        label: "template",
+        matches: (parsed) => parsed.kind === "views" || parsed.kind === "public",
+        getPrior: (cache, rel) => cache.fileMap[rel],
+        setCache: (cache, rel, entry) => { cache.fileMap[rel] = entry; },
+        save: (api, item) => api.saveTemplate(item),
+    },
+    {
+        name: "content record",
+        label: "content record",
+        matches: (parsed) => parsed.kind === "content" && parsed.type !== "images",
+        getPrior: (cache, rel) => cache.contentRecordMap[rel],
+        setCache: (cache, rel, entry) => { cache.contentRecordMap[rel] = entry; },
+        save: (api, item) => api.saveRecord(item),
+    },
+];
+
+async function pushLocalResource(viewsDir, cache, api, resource, { rel, parsed }) {
+    const full = path.join(viewsDir, rel);
+    const prior = resource.getPrior(cache, rel);
+    const stat = await fs.stat(full);
+    if (prior && prior.mtimeMs === stat.mtimeMs) return 0;
+
+    const readContent = resource.readContent || ((file) => fs.readFile(file, "utf-8"));
+    const content = await readContent(full, rel);
+    if (content == null) return 0;
+
+    if (prior && content === prior.content) {
+        resource.setCache(cache, rel, { ...prior, mtimeMs: stat.mtimeMs });
+        return 0;
+    }
+
+    const apiType = API_TYPE_BY_TREE_TYPE[parsed.type] || parsed.type;
+    try {
+        const resp = await resource.save(api, { key: parsed.key, type: apiType, content });
+        const finalContent = resp.content ?? content;
+        let finalMtime = stat.mtimeMs;
+        const currentStat = await fs.stat(full);
+        if (currentStat.mtimeMs === stat.mtimeMs && finalContent !== content) {
+            await fs.outputFile(full, finalContent);
+            finalMtime = (await fs.stat(full)).mtimeMs;
+        }
+        resource.setCache(cache, rel, { key: parsed.key, type: apiType, content: finalContent, mtimeMs: finalMtime });
+        const message = resource.successMessage
+            ? resource.successMessage({ prior, rel })
+            : `✅ ${prior ? "Updated" : "Created"} ${resource.label}: ${rel}`;
+        console.log(message);
+        return 1;
+    } catch (err) {
+        console.error(`❌ Error saving ${resource.name}${resource.name === "images" ? "" : ` ${rel}`}:`, err.body || err.message);
+        return 0;
+    }
+}
+
 /**
  * Push local edits. Order is strict and sequential: images → models → templates → content.
  * Images first, then models (because templates and content may reference model shapes).
@@ -391,136 +463,16 @@ async function walkFiles(viewsDir) {
 async function pushLocalChanges(viewsDir, cache, api) {
     const localFiles = await walkFiles(viewsDir);
 
-    const modelFiles = [];
-    const templateFiles = [];
-    const contentFiles = [];
-
-    for (const rel of localFiles) {
-        const parsed = parsePath(rel);
-        if (!parsed) continue;
-        if (parsed.type === "images") continue;
-        if (parsed.kind === "models") modelFiles.push({ rel, parsed });
-        else if (parsed.kind === "content") contentFiles.push({ rel, parsed });
-        else templateFiles.push({ rel, parsed });
-    }
+    const localResources = localFiles
+        .map((rel) => ({ rel, parsed: parsePath(rel) }))
+        .filter((item) => item.parsed);
 
     let pushed = 0;
 
-    // --- Images ---
-    const imagesPath = path.join(viewsDir, IMAGES_FILE);
-    if (await fs.pathExists(imagesPath)) {
-        const stat = await fs.stat(imagesPath);
-        const prior = cache.imagesJson;
-        if (!prior || prior.mtimeMs !== stat.mtimeMs) {
-            const content = await fs.readFile(imagesPath, "utf-8");
-            if (prior && content === prior.content) {
-                cache.imagesJson = { ...prior, mtimeMs: stat.mtimeMs };
-            } else {
-                try {
-                    const resp = await api.saveImages({ key: "images", type: "IMAGES", content });
-                    const finalContent = resp.content ?? content;
-                    let finalMtime = stat.mtimeMs;
-                    const currentStat = await fs.stat(imagesPath);
-                    if (currentStat.mtimeMs === stat.mtimeMs) {
-                        await fs.outputFile(imagesPath, finalContent);
-                        finalMtime = (await fs.stat(imagesPath)).mtimeMs;
-                    }
-                    cache.imagesJson = { key: "images", type: "IMAGES", content: finalContent, mtimeMs: finalMtime };
-                    console.log("✅ Updated images");
-                    pushed++;
-                } catch (err) {
-                    console.error("❌ Error saving images:", err.body || err.message);
-                }
-            }
-        }
-    }
-
-    // --- Models ---
-    for (const { rel, parsed } of modelFiles) {
-        const full = path.join(viewsDir, rel);
-        const prior = cache.modelMap[rel];
-        const stat = await fs.stat(full);
-        if (prior && prior.mtimeMs === stat.mtimeMs) continue;
-        const content = await fs.readFile(full, "utf-8");
-        if (prior && content === prior.content) {
-            cache.modelMap[rel] = { ...prior, mtimeMs: stat.mtimeMs };
-            continue;
-        }
-        try {
-            const apiType = API_TYPE_BY_TREE_TYPE[parsed.type] || parsed.type;
-            const resp = await api.saveModel({ key: parsed.key, type: apiType, content });
-            let finalMtime = stat.mtimeMs;
-            if (resp.content !== content) {
-                await fs.writeFile(full, resp.content, "utf-8");
-                finalMtime = (await fs.stat(full)).mtimeMs;
-            }
-            cache.modelMap[rel] = { key: parsed.key, type: apiType, content: resp.content, mtimeMs: finalMtime };
-            console.log(`✅ ${prior ? "Updated" : "Created"} model: ${rel}`);
-            pushed++;
-        } catch (err) {
-            console.error(`❌ Error saving model ${rel}:`, err.body || err.message);
-        }
-    }
-
-    // --- Templates ---
-    for (const { rel, parsed } of templateFiles) {
-        const full = path.join(viewsDir, rel);
-        const prior = cache.fileMap[rel];
-        const stat = await fs.stat(full);
-        if (prior && prior.mtimeMs === stat.mtimeMs) continue;
-        const content = await fs.readFile(full, "utf-8");
-        if (prior && content === prior.content) {
-            cache.fileMap[rel] = { ...prior, mtimeMs: stat.mtimeMs };
-            continue;
-        }
-        const modelRel = getModelFilePath(parsed.key, parsed.type);
-        if (modelRel && !cache.modelMap[modelRel]) {
-            console.warn(`⚠️ Skipping template ${rel}: no model found`);
-            continue;
-        }
-        try {
-            const apiType = API_TYPE_BY_TREE_TYPE[parsed.type] || parsed.type;
-            await api.saveTemplate({ key: parsed.key, type: apiType, content });
-            cache.fileMap[rel] = { key: parsed.key, type: apiType, content, mtimeMs: stat.mtimeMs };
-            console.log(`✅ ${prior ? "Updated" : "Created"} template: ${rel}`);
-            pushed++;
-        } catch (err) {
-            console.error(`❌ Error saving template ${rel}:`, err.body || err.message);
-        }
-    }
-
-    // --- Content records ---
-    for (const { rel, parsed } of contentFiles) {
-        const full = path.join(viewsDir, rel);
-        const prior = cache.contentRecordMap[rel];
-        const stat = await fs.stat(full);
-        if (prior && prior.mtimeMs === stat.mtimeMs) continue;
-        let content;
-        try {
-            content = JSON.stringify(JSON5.parse(await fs.readFile(full, "utf-8")), null, 2);
-        } catch {
-            console.error(`❌ Invalid JSON in content record: ${rel}`);
-            continue;
-        }
-        if (prior && content === prior.content) {
-            cache.contentRecordMap[rel] = { ...prior, mtimeMs: stat.mtimeMs };
-            continue;
-        }
-        try {
-            const apiType = API_TYPE_BY_TREE_TYPE[parsed.type] || parsed.type;
-            const resp = await api.saveRecord({ key: parsed.key, type: apiType, content });
-            const finalContent = resp.content ?? content;
-            let finalMtime = stat.mtimeMs;
-            const currentStat = await fs.stat(full);
-            if (currentStat.mtimeMs === stat.mtimeMs) {
-                await fs.outputFile(full, finalContent);
-                finalMtime = (await fs.stat(full)).mtimeMs;
-            }
-            cache.contentRecordMap[rel] = { key: parsed.key, type: apiType, content: finalContent, mtimeMs: finalMtime };
-            console.log(`✅ ${prior ? "Updated" : "Created"} content record: ${rel}`);
-            pushed++;
-        } catch (err) {
-            console.error(`❌ Error saving content record ${rel}:`, err.body || err.message);
+    for (const resource of PUSH_RESOURCES) {
+        for (const item of localResources) {
+            if (!resource.matches(item.parsed)) continue;
+            pushed += await pushLocalResource(viewsDir, cache, api, resource, item);
         }
     }
 
