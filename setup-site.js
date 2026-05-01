@@ -4,7 +4,7 @@
  * SleekCMS site sync — standalone, self-contained.
  *
  * Bi-directional sync between a local workspace and the SleekCMS server.
- * Safe to invoke repeatedly: a `.cache/` folder inside the workspace
+ * Safe to invoke repeatedly: a `.cache/state.json` inside the workspace
  * tracks server-known state so only real diffs are pushed.
  */
 
@@ -12,10 +12,6 @@ const fs = require("fs-extra");
 const os = require("os");
 const path = require("path");
 const { program } = require("commander");
-
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
 
 const API_BASE_URLS = {
     localhost:   "http://localhost:9000/api/ai_tools",
@@ -43,10 +39,6 @@ const SRC_DIRS = [
     "src/public/css",
 ];
 
-// ---------------------------------------------------------------------------
-// HTTP
-// ---------------------------------------------------------------------------
-
 async function request(baseUrl, token, method, p, body) {
     const res = await fetch(baseUrl + p, {
         method,
@@ -66,85 +58,21 @@ async function request(baseUrl, token, method, p, body) {
     return res.json();
 }
 
-function makeApi(token, env) {
-    const apiBase = API_BASE_URLS[env] || API_BASE_URLS.production;
-    const tmplBase = TEMPLATE_API_BASE_URLS[env] || TEMPLATE_API_BASE_URLS.production;
-    return {
-        fetchSite:  ()      => request(tmplBase, token, "GET",  "/site"),
-        fetchFiles: ()      => request(apiBase,  token, "GET",  "/get_files"),
-        saveFiles:  (files) => request(apiBase,  token, "POST", "/save_files", files),
-    };
-}
-
-// ---------------------------------------------------------------------------
-// Auxiliary files
-// ---------------------------------------------------------------------------
-
-const kebabCase = (str) => str.replace(/[\s_]+/g, "-").toLowerCase();
-
-async function writeVSCodeSettings(viewsDir) {
-    const settings = {
+async function writeAuxFiles(viewsDir, agentMdContent) {
+    if (agentMdContent) {
+        await fs.outputFile(path.join(viewsDir, "AGENT.md"), agentMdContent);
+        await fs.outputFile(path.join(viewsDir, "CLAUDE.md"), agentMdContent);
+        await fs.outputFile(path.join(viewsDir, ".vscode", "copilot-instructions.md"), agentMdContent);
+    }
+    await fs.outputFile(path.join(viewsDir, ".vscode", "settings.json"), JSON.stringify({
         "files.associations": { "*.model": "javascript" },
         "[javascript]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
         "js/ts.validate.enabled": false,
-    };
-    await fs.outputFile(
-        path.join(viewsDir, ".vscode", "settings.json"),
-        JSON.stringify(settings, null, 2)
-    );
-}
-
-async function writeAgentFiles(viewsDir, agentMdContent) {
-    await fs.outputFile(path.join(viewsDir, "AGENT.md"), agentMdContent);
-    await fs.outputFile(path.join(viewsDir, "CLAUDE.md"), agentMdContent);
-    await fs.outputFile(path.join(viewsDir, ".vscode", "copilot-instructions.md"), agentMdContent);
-}
-
-// ---------------------------------------------------------------------------
-// Cache
-// ---------------------------------------------------------------------------
-
-const CACHE_DIR = ".cache";
-const CACHE_STATE = "state.json";
-const CACHE_TOKEN = "token";
-
-function cachePaths(viewsDir) {
-    const dir = path.join(viewsDir, CACHE_DIR);
-    return {
-        dir,
-        state: path.join(dir, CACHE_STATE),
-        token: path.join(dir, CACHE_TOKEN),
-    };
-}
-
-async function ensureSourceStructure(viewsDir) {
-    await Promise.all(SRC_DIRS.map((dir) => fs.ensureDir(path.join(viewsDir, dir))));
-}
-
-async function loadCache(viewsDir) {
-    const { state } = cachePaths(viewsDir);
-    if (!(await fs.pathExists(state))) {
-        return { fileMap: {}, siteId: null, empty: true };
-    }
-    const data = await fs.readJson(state);
-    return {
-        fileMap: data.fileMap || {},
-        siteId:  data.siteId  || null,
-        empty: false,
-    };
-}
-
-async function saveCache(viewsDir, cache) {
-    const { dir, state } = cachePaths(viewsDir);
-    await fs.ensureDir(dir);
-    await fs.writeJson(state, {
-        siteId: cache.siteId,
-        fileMap: cache.fileMap,
-    }, { spaces: 2 });
+    }, null, 2));
 }
 
 async function checkAndWriteToken(viewsDir, token) {
-    const { dir, token: tokenPath } = cachePaths(viewsDir);
+    const tokenPath = path.join(viewsDir, ".cache", "token");
     if (await fs.pathExists(tokenPath)) {
         const existing = (await fs.readFile(tokenPath, "utf-8")).trim();
         if (existing !== token) {
@@ -155,20 +83,13 @@ async function checkAndWriteToken(viewsDir, token) {
         }
         return;
     }
-    await fs.ensureDir(dir);
-    await fs.writeFile(tokenPath, token, "utf-8");
+    await fs.outputFile(tokenPath, token);
 }
 
-// ---------------------------------------------------------------------------
-// Sync
-// ---------------------------------------------------------------------------
-
-/**
- * Resolve the workspace dir from a base path + site info. Mirrors the
- * previous behavior in index.js (slug = kebab(name[0..20] + id)).
- */
 function resolveViewsDir(basePath, site) {
-    const slug = kebabCase(`${site.name.substr(0, 20)} ${site.id}`);
+    const slug = `${site.name.substr(0, 20)} ${site.id}`
+        .replace(/[\s_]+/g, "-")
+        .toLowerCase();
     const base = basePath || path.join(os.homedir(), ".sleekcms");
     return path.resolve(base, slug);
 }
@@ -177,79 +98,52 @@ async function syncSite(opts) {
     const token = (opts.token || "").trim();
     if (!token) throw new Error("syncSite: token is required");
 
-    const tokenParts = token.split("-");
-    const env = (opts.env || tokenParts[2] || "production").toLowerCase();
-    const api = makeApi(token, env);
+    const env = (opts.env || token.split("-")[2] || "production").toLowerCase();
+    const apiBase = API_BASE_URLS[env] || API_BASE_URLS.production;
+    const tmplBase = TEMPLATE_API_BASE_URLS[env] || TEMPLATE_API_BASE_URLS.production;
 
-    const site = await api.fetchSite();
+    const site = await request(tmplBase, token, "GET", "/site");
 
     const viewsDir = opts.viewsDir
         ? path.resolve(opts.viewsDir)
         : resolveViewsDir(opts.path, site);
 
     await fs.ensureDir(viewsDir);
-    await ensureSourceStructure(viewsDir);
+    await Promise.all(SRC_DIRS.map((dir) => fs.ensureDir(path.join(viewsDir, dir))));
     await checkAndWriteToken(viewsDir, token);
 
-    if (opts.flush) {
-        const { state } = cachePaths(viewsDir);
-        await fs.remove(state);
-    }
+    const statePath = path.join(viewsDir, ".cache", "state.json");
+    if (opts.flush) await fs.remove(statePath);
 
-    const cache = await loadCache(viewsDir);
-    const isFirstRun = cache.empty;
-    cache.siteId = site.id;
+    const isFirstRun = !(await fs.pathExists(statePath));
+    let fileMap = isFirstRun ? {} : (await fs.readJson(statePath)).fileMap || {};
 
     let pushed = 0;
     let pulled = 0;
 
     if (isFirstRun) {
-        pulled = await pullServerState(viewsDir, cache, api);
+        ({ fileMap, pulled } = await pullServerState(viewsDir, fileMap, apiBase, token));
+        await writeAuxFiles(viewsDir, opts.agentMd);
     } else {
-        pushed = await pushLocalChanges(viewsDir, cache, api);
+        pushed = await pushLocalChanges(viewsDir, fileMap, apiBase, token);
     }
 
-    if (isFirstRun) {
-        if (opts.agentMd) await writeAgentFiles(viewsDir, opts.agentMd);
-        await writeVSCodeSettings(viewsDir);
-    }
+    await fs.outputJson(statePath, { fileMap }, { spaces: 2 });
 
-    await saveCache(viewsDir, cache);
-
-    return {
-        viewsDir,
-        site,
-        fileMap: cache.fileMap,
-        isFirstRun,
-        pushed,
-        pulled,
-    };
+    return { viewsDir, site, isFirstRun, pushed, pulled };
 }
 
-// ---------------------------------------------------------------------------
-// Push
-// ---------------------------------------------------------------------------
-
 async function walkFiles(viewsDir) {
-    const out = [];
     const sourceRoot = path.join(viewsDir, "src");
+    if (!(await fs.pathExists(sourceRoot))) return [];
 
-    if (!(await fs.pathExists(sourceRoot))) {
-        return out;
-    }
-
+    const out = [];
     async function walk(dir) {
-        let entries;
-        try { entries = await fs.readdir(dir, { withFileTypes: true }); }
-        catch { return; }
+        const entries = await fs.readdir(dir, { withFileTypes: true });
         for (const entry of entries) {
             const full = path.join(dir, entry.name);
-            const rel = path.relative(viewsDir, full).replace(/\\/g, "/");
-            if (entry.isDirectory()) {
-                await walk(full);
-            } else if (entry.isFile()) {
-                out.push(rel);
-            }
+            if (entry.isDirectory()) await walk(full);
+            else if (entry.isFile()) out.push(path.relative(viewsDir, full).replace(/\\/g, "/"));
         }
     }
     await walk(sourceRoot);
@@ -257,19 +151,17 @@ async function walkFiles(viewsDir) {
 }
 
 /**
- * Push local edits via the unified /save_files endpoint. The server enforces
- * save order (images → models → templates → content).
+ * Push local edits via /save_files. Server enforces save order.
  *
  * Cheap-skip: file mtime matches cache → don't read.
  * Content-skip: file content matches cache → just refresh cached mtime.
  */
-async function pushLocalChanges(viewsDir, cache, api) {
-    const localFiles = await walkFiles(viewsDir);
+async function pushLocalChanges(viewsDir, fileMap, apiBase, token) {
     const changes = [];
 
-    for (const rel of localFiles) {
+    for (const rel of await walkFiles(viewsDir)) {
         const full = path.join(viewsDir, rel);
-        const prior = cache.fileMap[rel];
+        const prior = fileMap[rel];
         const stat = await fs.stat(full);
 
         if (prior && prior.mtimeMs === stat.mtimeMs) continue;
@@ -277,7 +169,7 @@ async function pushLocalChanges(viewsDir, cache, api) {
         const content = await fs.readFile(full, "utf-8");
 
         if (prior && content === prior.content) {
-            cache.fileMap[rel] = { content, mtimeMs: stat.mtimeMs };
+            fileMap[rel] = { content, mtimeMs: stat.mtimeMs };
             continue;
         }
 
@@ -286,25 +178,29 @@ async function pushLocalChanges(viewsDir, cache, api) {
 
     if (changes.length === 0) return 0;
 
-    const payload = changes.map((c) => ({ path: c.rel, content: c.content }));
-
     let results;
     try {
-        results = await api.saveFiles(payload);
+        results = await request(apiBase, token, "POST", "/save_files",
+            changes.map((c) => ({ path: c.rel, content: c.content })));
     } catch (err) {
         console.error("❌ Error saving files:", err.body || err.message);
         return 0;
     }
 
+    const errors = await loadErrors(viewsDir);
     let pushed = 0;
+
     for (let i = 0; i < changes.length; i++) {
         const c = changes[i];
-        const r = (results && results[i]) || {};
+        const r = results[i] || {};
 
         if (r.error) {
+            errors[c.rel] = r.error;
             console.error(`❌ Error saving ${c.rel}: ${r.error}`);
             continue;
         }
+
+        delete errors[c.rel];
 
         const finalContent = r.content ?? c.content;
         let finalMtime = c.stat.mtimeMs;
@@ -315,37 +211,49 @@ async function pushLocalChanges(viewsDir, cache, api) {
             finalMtime = (await fs.stat(c.full)).mtimeMs;
         }
 
-        cache.fileMap[c.rel] = { content: finalContent, mtimeMs: finalMtime };
+        fileMap[c.rel] = { content: finalContent, mtimeMs: finalMtime };
         console.log(`✅ ${c.prior ? "Updated" : "Created"} ${c.rel}`);
         pushed++;
     }
 
+    await saveErrors(viewsDir, errors);
     return pushed;
 }
 
-// ---------------------------------------------------------------------------
-// Pull
-// ---------------------------------------------------------------------------
+const ERROR_LOG = "sync-errors.log";
 
-async function removeStale(viewsDir, oldMap, newMap) {
-    for (const rel of Object.keys(oldMap)) {
-        if (!newMap[rel]) {
-            try { await fs.unlink(path.join(viewsDir, rel)); } catch {}
-            console.log(`🗑️  Removed (deleted on server): ${rel}`);
-        }
+async function loadErrors(viewsDir) {
+    const file = path.join(viewsDir, ERROR_LOG);
+    if (!(await fs.pathExists(file))) return {};
+    const text = await fs.readFile(file, "utf-8");
+    const errors = {};
+    for (const line of text.split("\n")) {
+        const idx = line.indexOf(": ");
+        if (idx > 0) errors[line.slice(0, idx)] = line.slice(idx + 2);
     }
+    return errors;
 }
 
-async function pullServerState(viewsDir, cache, api) {
-    console.log("📥 Fetching files...");
-    const files = await api.fetchFiles();
+async function saveErrors(viewsDir, errors) {
+    const file = path.join(viewsDir, ERROR_LOG);
+    const entries = Object.entries(errors);
+    if (entries.length === 0) {
+        await fs.remove(file);
+        return;
+    }
+    await fs.outputFile(file, entries.map(([p, msg]) => `${p}: ${msg}`).join("\n") + "\n");
+}
 
-    const newFileMap = {};
+async function pullServerState(viewsDir, oldFileMap, apiBase, token) {
+    console.log("📥 Fetching files...");
+    const files = await request(apiBase, token, "GET", "/get_files");
+
+    const fileMap = {};
     let pulled = 0;
 
     for (const file of files) {
         const full = path.join(viewsDir, file.path);
-        const prior = cache.fileMap[file.path];
+        const prior = oldFileMap[file.path];
 
         let mtimeMs = prior?.mtimeMs;
         if (!prior || prior.content !== file.content) {
@@ -356,27 +264,21 @@ async function pullServerState(viewsDir, cache, api) {
             try { mtimeMs = (await fs.stat(full)).mtimeMs; } catch {}
         }
 
-        newFileMap[file.path] = { content: file.content, mtimeMs };
+        fileMap[file.path] = { content: file.content, mtimeMs };
     }
 
-    await removeStale(viewsDir, cache.fileMap, newFileMap);
-    cache.fileMap = newFileMap;
+    for (const rel of Object.keys(oldFileMap)) {
+        if (!fileMap[rel]) {
+            try { await fs.unlink(path.join(viewsDir, rel)); } catch {}
+            console.log(`🗑️  Removed (deleted on server): ${rel}`);
+        }
+    }
 
     console.log(`✔️ Synced ${files.length} file(s).`);
-    return pulled;
+    return { fileMap, pulled };
 }
 
-// ---------------------------------------------------------------------------
-// Exports + CLI
-// ---------------------------------------------------------------------------
-
-module.exports = {
-    syncSite,
-    resolveViewsDir,
-    writeAgentFiles,
-    writeVSCodeSettings,
-    kebabCase,
-};
+module.exports = { syncSite, resolveViewsDir };
 
 if (require.main === module) {
     program
@@ -388,10 +290,9 @@ if (require.main === module) {
         .parse(process.argv);
 
     const opts = program.opts();
-    const basePath = opts.dir || path.join(os.homedir(), ".sleekcms");
     syncSite({
         token: opts.token,
-        path: basePath,
+        path: opts.dir || path.join(os.homedir(), ".sleekcms"),
         env: opts.env,
     })
         .then(({ viewsDir, site, isFirstRun, pulled }) => {

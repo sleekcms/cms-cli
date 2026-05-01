@@ -7,17 +7,7 @@ const fs = require("fs-extra");
 const {
     syncSite,
     resolveViewsDir,
-    kebabCase,
 } = require("../setup-site");
-
-// ---------------------------------------------------------------------------
-// Pure helpers
-// ---------------------------------------------------------------------------
-
-test("kebabCase lowercases and replaces spaces/underscores", () => {
-    assert.equal(kebabCase("Hello World"), "hello-world");
-    assert.equal(kebabCase("foo_bar  baz"), "foo-bar-baz");
-});
 
 test("resolveViewsDir builds slug from site name + id", () => {
     const dir = resolveViewsDir("/tmp/base", { name: "My Cool Site", id: 42 });
@@ -26,7 +16,7 @@ test("resolveViewsDir builds slug from site name + id", () => {
 
 test("resolveViewsDir truncates long names to 20 chars", () => {
     const dir = resolveViewsDir("/tmp", { name: "A".repeat(30), id: 7 });
-    assert.ok(dir.endsWith(kebabCase("A".repeat(20) + " 7")));
+    assert.ok(dir.endsWith("a".repeat(20) + "-7"));
 });
 
 // ---------------------------------------------------------------------------
@@ -146,7 +136,6 @@ test("syncSite: first run creates workspace, pulls files, writes cache + aux", a
 
         // Cache + token
         const cache = await fs.readJson(path.join(ws, ".cache/state.json"));
-        assert.equal(cache.siteId, 123);
         assert.ok(cache.fileMap["src/views/pages/home.ejs"]);
         assert.ok(cache.fileMap["src/models/pages/home.model"]);
         assert.ok(cache.fileMap["src/content/pages/home.json"]);
