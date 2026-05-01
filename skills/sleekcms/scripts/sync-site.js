@@ -38,6 +38,8 @@ const TYPE_CONFIG = {
     BASE:  { dir: 'layouts', ext: '.ejs', noModel: true },
 };
 
+const WORKSPACE_SRC_DIR = "src";
+
 // ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
@@ -83,23 +85,33 @@ function makeApi(token, env) {
 
 const kebabCase = (str) => str.replace(/[\s_]+/g, "-").toLowerCase();
 
+function withSourcePrefix(relPath) {
+    return `${WORKSPACE_SRC_DIR}/${relPath}`;
+}
+
+function withoutSourcePrefix(filePath) {
+    const prefix = `${WORKSPACE_SRC_DIR}/`;
+    return filePath.startsWith(prefix) ? filePath.slice(prefix.length) : filePath;
+}
+
 function getFilePath(key, type) {
     const c = TYPE_CONFIG[type];
-    return c ? `${c.dir}/${key}${c.ext}` : null;
+    return c ? withSourcePrefix(`${c.dir}/${key}${c.ext}`) : null;
 }
 
 function getModelFilePath(key, type) {
     const c = TYPE_CONFIG[type];
-    return c && !c.noModel ? `models/${c.dir}/${key}.model` : null;
+    return c && !c.noModel ? withSourcePrefix(`models/${c.dir}/${key}.model`) : null;
 }
 
 function getContentRecordFilePath(key, type) {
     const c = TYPE_CONFIG[type];
-    return c && key ? `content/${c.dir}/${key}.json` : null;
+    return c && key ? withSourcePrefix(`content/${c.dir}/${key}.json`) : null;
 }
 
 function parseFilePath(filePath) {
-    const parts = filePath.split("/");
+    const logicalPath = withoutSourcePrefix(filePath);
+    const parts = logicalPath.split("/");
     if (parts.length < 2) return null;
     const dir = parts[0];
     const filename = parts.slice(1).join("/");
@@ -112,8 +124,9 @@ function parseFilePath(filePath) {
 }
 
 function parseModelFilePath(filePath) {
-    if (!filePath.startsWith("models/")) return null;
-    const parts = filePath.slice(7).split("/");
+    const logicalPath = withoutSourcePrefix(filePath);
+    if (!logicalPath.startsWith("models/")) return null;
+    const parts = logicalPath.slice(7).split("/");
     if (parts.length < 2) return null;
     const dir = parts[0];
     const filename = parts.slice(1).join("/");
@@ -125,8 +138,9 @@ function parseModelFilePath(filePath) {
 }
 
 function parseContentRecordFilePath(filePath) {
-    if (!filePath.startsWith("content/")) return null;
-    const rest = filePath.slice(8);
+    const logicalPath = withoutSourcePrefix(filePath);
+    if (!logicalPath.startsWith("content/")) return null;
+    const rest = logicalPath.slice(8);
     const slash = rest.indexOf("/");
     if (slash === -1) return null;
     const typeDir = rest.slice(0, slash);
@@ -173,6 +187,46 @@ function cachePaths(viewsDir) {
         state: path.join(dir, CACHE_STATE),
         token: path.join(dir, CACHE_TOKEN),
     };
+}
+
+async function migrateLegacyLayout(viewsDir) {
+    const sourceRoot = path.join(viewsDir, WORKSPACE_SRC_DIR);
+    await fs.ensureDir(sourceRoot);
+
+    const legacyEntries = [
+        "pages",
+        "entries",
+        "blocks",
+        "js",
+        "css",
+        "layouts",
+        "models",
+        "content",
+        "images.json",
+    ];
+
+    for (const entry of legacyEntries) {
+        const from = path.join(viewsDir, entry);
+        const to = path.join(sourceRoot, entry);
+        if (!(await fs.pathExists(from))) continue;
+        if (await fs.pathExists(to)) continue;
+        await fs.move(from, to);
+    }
+}
+
+function migrateCachePathsToSource(cache) {
+    const migrateMap = (map) => {
+        const next = {};
+        for (const [rel, value] of Object.entries(map || {})) {
+            const nextRel = rel.startsWith(`${WORKSPACE_SRC_DIR}/`) ? rel : withSourcePrefix(rel);
+            next[nextRel] = value;
+        }
+        return next;
+    };
+
+    cache.fileMap = migrateMap(cache.fileMap);
+    cache.modelMap = migrateMap(cache.modelMap);
+    cache.contentRecordMap = migrateMap(cache.contentRecordMap);
 }
 
 async function loadCache(viewsDir) {
@@ -260,6 +314,7 @@ async function syncSite(opts) {
         : resolveViewsDir(opts.path, site);
 
     await fs.ensureDir(viewsDir);
+    await migrateLegacyLayout(viewsDir);
     await checkAndWriteToken(viewsDir, token);
 
     if (opts.flush) {
@@ -268,6 +323,7 @@ async function syncSite(opts) {
     }
 
     const cache = await loadCache(viewsDir);
+    migrateCachePathsToSource(cache);
     const isFirstRun = cache.empty;
     cache.siteId = site.id;
 
@@ -308,6 +364,12 @@ async function syncSite(opts) {
 
 async function walkFiles(viewsDir) {
     const out = [];
+    const sourceRoot = path.join(viewsDir, WORKSPACE_SRC_DIR);
+
+    if (!(await fs.pathExists(sourceRoot))) {
+        return out;
+    }
+
     async function walk(dir) {
         let entries;
         try { entries = await fs.readdir(dir, { withFileTypes: true }); }
@@ -316,15 +378,13 @@ async function walkFiles(viewsDir) {
             const full = path.join(dir, entry.name);
             const rel = path.relative(viewsDir, full).replace(/\\/g, "/");
             if (entry.isDirectory()) {
-                if (rel === ".cache" || rel === ".vscode") continue;
                 await walk(full);
             } else if (entry.isFile()) {
-                if (rel === "AGENT.md" || rel === "CLAUDE.md") continue;
                 out.push(rel);
             }
         }
     }
-    await walk(viewsDir);
+    await walk(sourceRoot);
     return out;
 }
 
@@ -343,10 +403,11 @@ async function pushLocalChanges(viewsDir, cache, api) {
     const contentFiles = [];
 
     for (const rel of localFiles) {
-        if (rel.startsWith("models/")) {
+        const logicalRel = withoutSourcePrefix(rel);
+        if (logicalRel.startsWith("models/")) {
             const parsed = parseModelFilePath(rel);
             if (parsed) modelFiles.push({ rel, parsed });
-        } else if (rel.startsWith("content/")) {
+        } else if (logicalRel.startsWith("content/")) {
             const parsed = parseContentRecordFilePath(rel);
             if (parsed) contentFiles.push({ rel, parsed });
         } else {
@@ -358,7 +419,7 @@ async function pushLocalChanges(viewsDir, cache, api) {
     let pushed = 0;
 
     // --- Images ---
-    const imagesPath = path.join(viewsDir, "images.json");
+    const imagesPath = path.join(viewsDir, WORKSPACE_SRC_DIR, "images.json");
     if (await fs.pathExists(imagesPath)) {
         const stat = await fs.stat(imagesPath);
         const prior = cache.imagesJson;
@@ -367,7 +428,7 @@ async function pushLocalChanges(viewsDir, cache, api) {
             try {
                 images = JSON.parse(await fs.readFile(imagesPath, "utf-8"));
             } catch {
-                console.error("❌ Invalid JSON in images.json");
+                console.error(`❌ Invalid JSON in ${WORKSPACE_SRC_DIR}/images.json`);
             }
             if (images !== undefined) {
                 if (prior && JSON.stringify(images) === JSON.stringify(prior.data)) {
@@ -465,12 +526,7 @@ async function pushLocalChanges(viewsDir, cache, api) {
         try {
             const resp = await api.saveRecord(parsed.key, parsed.type, item);
             console.log(`📨 save_record response (${rel}):`, resp);
-            let receivedItem = item;
-            if (resp.item !== undefined) {
-                receivedItem = resp.item;
-            } else if (typeof resp.content === "string") {
-                try { receivedItem = JSON5.parse(resp.content); } catch {}
-            }
+            const receivedItem = resp.item ?? item;
             let finalMtime = stat.mtimeMs;
             // Always write server response back to file unless file was modified while save was in-flight
             const currentStat = await fs.stat(full);
@@ -595,7 +651,7 @@ async function pullServerState(viewsDir, cache, api) {
     try {
         console.log("📥 Fetching images...");
         const images = await api.fetchImages();
-        const imagesPath = path.join(viewsDir, "images.json");
+        const imagesPath = path.join(viewsDir, WORKSPACE_SRC_DIR, "images.json");
         const content = JSON.stringify(images, null, 2);
         const prior = cache.imagesJson;
         const priorContent = prior ? JSON.stringify(prior.data, null, 2) : null;

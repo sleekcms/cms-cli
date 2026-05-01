@@ -7,6 +7,7 @@
  *   - calls back into a provided `onSync` handler that invokes syncSite()
  */
 
+const path = require("path");
 const chokidar = require("chokidar");
 
 const DEBOUNCE_DELAY = 5000;
@@ -55,21 +56,18 @@ function scheduleSync() {
     debounceTimer = setTimeout(flush, DEBOUNCE_DELAY);
 }
 
+function watchTargets(rootDir) {
+    return [path.join(rootDir, "src", "**", "*")];
+}
+
 function monitorFiles() {
-    watcher = chokidar.watch(viewsDir, {
+    watcher = chokidar.watch(watchTargets(viewsDir), {
         persistent: true,
         ignoreInitial: true,
-        ignored: [
-            /\.vscode\//,
-            /\.cache\//,
-            /AGENT\.md$/,
-            /CLAUDE\.md$/,
-            /\.sleekcms\//,
-        ],
     })
-        .on("change", scheduleSync)
-        .on("add", scheduleSync)
-        .on("unlink", scheduleSync);
+        .on("change", (path) => { console.log(`📝 Changed: ${path}`); scheduleSync(); })
+        .on("add", (path) => { console.log(`➕ Added: ${path}`); scheduleSync(); })
+        .on("unlink", (path) => { console.log(`🗑️  Deleted: ${path}`); scheduleSync(); });
 }
 
 async function stopWatching() {
