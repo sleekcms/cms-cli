@@ -129,7 +129,7 @@ JSON structure without quotes on keys or string values. Scalar values are the fi
 | `text` | String |
 | `paragraph` | String (multiline) |
 | `richtext` | HTML string |
-| `markdown` | Markdown string (use `marked()` to convert to HTML) |
+| `markdown` | Markdown string (use `marked()` to convert to HTML). Inside markdown, use the same image shortcut convention inside standard image syntax: `![alt](pexels:doctor)`. To set the image's alt, append `\|<alt>` — and any `<width>x<height>` pattern in the description sets the URL's `w`/`h` (defaults to `600x400`). E.g. `![doctor](pexels:doctor\|Smiling doctor 800x600)`. |
 | `number` | Number |
 | `boolean` | `true` / `false` |
 | `date` | `YYYY-MM-DD` |
@@ -175,7 +175,7 @@ How values in content JSON map to the types declared in the model:
 | `date` | `"YYYY-MM-DD"` string |
 | `datetime` | ISO 8601 string |
 | `time` | `"HH:mm"` string |
-| `image` | Either a resolved `{ "url": "...", "alt": "..." }` object, **or** a shortcut string `"<source>:<search>"` (e.g., `"pexels:doctor"`, `"url:https://picsum.photos/200.jpg"`, `"cms:logo"`). Supported sources: `unsplash`, `pexels`, `pixabay`, `iconify`, `url`, `cms` (reuses an image declared in `/images.json` by handle). On save, the sync engine resolves the shortcut/link to a full image object automatically. |
+| `image` | Either a resolved `{ "url": "...", "alt": "..." }` object, **or** a shortcut string `"<source>:<search>"` (e.g., `"pexels:doctor"`, `"url:https://picsum.photos/200.jpg"`, `"cms:logo"`). Supported sources: `unsplash`, `pexels`, `pixabay`, `iconify`, `url`, `cms` (reuses an image declared in `/images.json` by handle). Append `\|<alt text>` to set the image's alt, e.g. `"pexels:doctor\|Smiling doctor with stethoscope"`. On save, the sync engine resolves the shortcut/link to a full image object automatically. |
 | `video` | `{ "url": "...", "embed": "..." }` |
 | `json` | Object or array |
 | `sheet` | Array of arrays |
@@ -482,7 +482,8 @@ Template:
 6. Fields in a content JSON file must match the keys defined in the corresponding `.model`. Adding a new field requires updating the `.model` first.
 7. Collection page items each live in their own file under `content/pages/<key>/<slug>.json` — the collection key already includes `[]` (e.g., `content/pages/blog[]/my-post.json`). The `<slug>` filename is the URL segment; renaming the file renames the URL.
 8. **Collection key suffix `[]` is mandatory and must appear on every related file.** For a collection model (pages or entries — e.g., `blog`, `testimonials`, `authors`), the key `<name>[]` is part of the filename on the model, template, **and** content JSON: `models/entries/testimonials[].model`, `entries/testimonials[].ejs`, `content/entries/testimonials[].json` (array). Same rule for collection pages: `models/pages/blog[].model`, `pages/blog[].ejs`, and one file per slug under `content/pages/blog[]/<slug>.json`. Never drop the `[]` — files without it are treated as singles and will not resolve.
-9. For `image` fields in content JSON, prefer the shortcut form `"<source>:<search>"` (sources: `unsplash`, `pexels`, `pixabay`, `iconify`) — e.g., `"pexels:doctor"`. The sync engine resolves it to a full `{ url, alt }` object on save. Only write the object form when you have a specific asset URL. When the same image is reused across pages (logos, shared icons, recurring art), declare it once in `/images.json` and reference it via `"cms:<handle>"`.
+9. For `image` fields in content JSON, prefer the shortcut form `"<source>:<search>"` (sources: `unsplash`, `pexels`, `pixabay`, `iconify`) — e.g., `"pexels:doctor"`. Add alt text by appending `|<alt>` to the shortcut: `"pexels:doctor|Smiling doctor with stethoscope"`. The sync engine resolves it to a full `{ url, alt }` object on save. When the same image is reused across pages (logos, shared icons, recurring art), declare it once in `/images.json` and reference it via `"cms:<handle>"`.
+12. Inside `markdown` fields, embed images with `![alt](<source>:<search>)` — same sources as image fields. Append `|<alt>` to store alt on the image record (e.g. `![doctor](pexels:doctor|Friendly family doctor)`). Including a `<W>x<H>` token in the description (e.g. `|hero shot 1200x600`) sets the rendered URL's `w` and `h` query params; otherwise the default is `600x400`. On save, refs are rewritten to actual CDN URLs and the underlying image record is created automatically.
 10. Always create RSS feed for blogs and link them in meta so it is discoverable. Use "rss.xml" as the key.
 11. Make the sites extremely SEO friendly and sharing friendly
 
