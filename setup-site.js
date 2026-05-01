@@ -122,7 +122,7 @@ async function syncSite(opts) {
     let pulled = 0;
 
     if (isFirstRun) {
-        ({ fileMap, pulled } = await pullServerState(viewsDir, fileMap, apiBase, token));
+        ({ fileMap, pulled } = await pullServerState(viewsDir, apiBase, token));
         await writeAuxFiles(viewsDir, opts.agentMd);
     } else {
         pushed = await pushLocalChanges(viewsDir, fileMap, apiBase, token);
@@ -153,8 +153,9 @@ async function walkFiles(viewsDir) {
 /**
  * Push local edits via /save_files. Server enforces save order.
  *
- * Cheap-skip: file mtime matches cache → don't read.
- * Content-skip: file content matches cache → just refresh cached mtime.
+ * Skip: file mtime matches cache → don't read, don't push.
+ * After save, only overwrite the local file if its mtime is unchanged from
+ * when we read it — otherwise a newer local edit is pending and we'd clobber it.
  */
 async function pushLocalChanges(viewsDir, fileMap, apiBase, token) {
     const changes = [];
@@ -167,12 +168,6 @@ async function pushLocalChanges(viewsDir, fileMap, apiBase, token) {
         if (prior && prior.mtimeMs === stat.mtimeMs) continue;
 
         const content = await fs.readFile(full, "utf-8");
-
-        if (prior && content === prior.content) {
-            fileMap[rel] = { content, mtimeMs: stat.mtimeMs };
-            continue;
-        }
-
         changes.push({ rel, full, stat, content, prior });
     }
 
@@ -211,7 +206,7 @@ async function pushLocalChanges(viewsDir, fileMap, apiBase, token) {
             finalMtime = (await fs.stat(c.full)).mtimeMs;
         }
 
-        fileMap[c.rel] = { content: finalContent, mtimeMs: finalMtime };
+        fileMap[c.rel] = { mtimeMs: finalMtime };
         console.log(`✅ ${c.prior ? "Updated" : "Created"} ${c.rel}`);
         pushed++;
     }
@@ -244,7 +239,7 @@ async function saveErrors(viewsDir, errors) {
     await fs.outputFile(file, entries.map(([p, msg]) => `${p}: ${msg}`).join("\n") + "\n");
 }
 
-async function pullServerState(viewsDir, oldFileMap, apiBase, token) {
+async function pullServerState(viewsDir, apiBase, token) {
     console.log("📥 Fetching files...");
     const files = await request(apiBase, token, "GET", "/get_files");
 
@@ -253,25 +248,10 @@ async function pullServerState(viewsDir, oldFileMap, apiBase, token) {
 
     for (const file of files) {
         const full = path.join(viewsDir, file.path);
-        const prior = oldFileMap[file.path];
-
-        let mtimeMs = prior?.mtimeMs;
-        if (!prior || prior.content !== file.content) {
-            await fs.outputFile(full, file.content);
-            mtimeMs = (await fs.stat(full)).mtimeMs;
-            pulled++;
-        } else if (mtimeMs == null) {
-            try { mtimeMs = (await fs.stat(full)).mtimeMs; } catch {}
-        }
-
-        fileMap[file.path] = { content: file.content, mtimeMs };
-    }
-
-    for (const rel of Object.keys(oldFileMap)) {
-        if (!fileMap[rel]) {
-            try { await fs.unlink(path.join(viewsDir, rel)); } catch {}
-            console.log(`🗑️  Removed (deleted on server): ${rel}`);
-        }
+        await fs.outputFile(full, file.content);
+        const mtimeMs = (await fs.stat(full)).mtimeMs;
+        pulled++;
+        fileMap[file.path] = { mtimeMs };
     }
 
     console.log(`✔️ Synced ${files.length} file(s).`);
