@@ -30,16 +30,41 @@ const TEMPLATE_API_BASE_URLS = {
     production:  "https://app.sleekcms.com/api/template",
 };
 
-const TYPE_CONFIG = {
-    PAGE:  { templateDir: "views/pages",   dataDir: "pages",   ext: ".ejs" },
-    ENTRY: { templateDir: "views/entries", dataDir: "entries", ext: ".ejs" },
-    BLOCK: { templateDir: "views/blocks",  dataDir: "blocks",  ext: ".ejs" },
-    JS:    { templateDir: "public/js",     dataDir: "js",      ext: ".js",  noModel: true },
-    CSS:   { templateDir: "public/css",    dataDir: "css",     ext: ".css", noModel: true },
-    BASE:  { templateDir: "views/layouts", dataDir: "layouts", ext: ".ejs", noModel: true },
+const TREE = {
+    src: {
+        views: { blocks: "ejs", entries: "ejs", pages: "ejs", layouts: "ejs" },
+        models: { blocks: "model", entries: "model", pages: "model" },
+        content: { pages: "json", entries: "json", images: true },
+        public: { js: "js", css: "css" },
+    },
 };
 
-const WORKSPACE_SRC_DIR = "src";
+const PATH_ROOTS = Object.fromEntries(
+    Object.keys(TREE.src).map((kind) => [kind, `src/${kind}`])
+);
+
+const MODEL_TYPES = new Set(Object.keys(TREE.src.models));
+const CONTENT_TYPES = new Set(Object.keys(TREE.src.content).filter((bucket) => bucket !== "images"));
+const IMAGES_FILE = `${PATH_ROOTS.content}/images.json`;
+const TREE_TYPE_BY_API_TYPE = {
+    BASE: "layouts",
+    BLOCK: "blocks",
+    ENTRY: "entries",
+    PAGE: "pages",
+};
+const API_TYPE_BY_TREE_TYPE = {
+    blocks: "BLOCK",
+    css: "CSS",
+    entries: "ENTRY",
+    images: "IMAGES",
+    js: "JS",
+    layouts: "BASE",
+    pages: "PAGE",
+};
+const FILE_KIND_BY_TYPE = {
+    views: ["blocks", "entries", "layouts", "pages"],
+    public: ["js", "css"],
+};
 
 // ---------------------------------------------------------------------------
 // HTTP
@@ -68,15 +93,15 @@ function makeApi(token, env) {
     const apiBase = API_BASE_URLS[env] || API_BASE_URLS.production;
     const tmplBase = TEMPLATE_API_BASE_URLS[env] || TEMPLATE_API_BASE_URLS.production;
     return {
-        fetchSite:           ()             => request(tmplBase, token, "GET",  "/site"),
-        fetchTemplates:      ()             => request(apiBase,  token, "GET",  "/get_templates"),
-        fetchModels:         ()             => request(apiBase,  token, "GET",  "/get_models"),
-        fetchContentRecords: ()             => request(apiBase,  token, "GET",  "/get_records"),
-        saveTemplate:        (key, type, code)  => request(apiBase, token, "POST", "/save_template", { key, type, code: code || "" }),
-        saveModel:           (key, type, shape) => request(apiBase, token, "POST", "/save_model",    { key, type, shape: shape || "" }),
-        saveRecord:          (key, type, item)  => request(apiBase, token, "POST", "/save_record",   { key, type, item }),
-        fetchImages:         ()                 => request(apiBase, token, "GET",  "/get_images"),
-        saveImages:          (images)           => request(apiBase, token, "POST", "/save_images",   images),
+        fetchSite:           ()     => request(tmplBase, token, "GET",  "/site"),
+        fetchTemplates:      ()     => request(apiBase,  token, "GET",  "/get_templates"),
+        fetchModels:         ()     => request(apiBase,  token, "GET",  "/get_models"),
+        fetchContentRecords: ()     => request(apiBase,  token, "GET",  "/get_records"),
+        fetchImages:         ()     => request(apiBase,  token, "GET",  "/get_images"),
+        saveTemplate:        (item) => request(apiBase,  token, "POST", "/save_template", item),
+        saveModel:           (item) => request(apiBase,  token, "POST", "/save_model",    item),
+        saveRecord:          (item) => request(apiBase,  token, "POST", "/save_record",   item),
+        saveImages:          (item) => request(apiBase,  token, "POST", "/save_images",   item),
     };
 }
 
@@ -86,71 +111,64 @@ function makeApi(token, env) {
 
 const kebabCase = (str) => str.replace(/[\s_]+/g, "-").toLowerCase();
 
-function withSourcePrefix(relPath) {
-    return `${WORKSPACE_SRC_DIR}/${relPath}`;
+
+function getPathConfig(kind, type) {
+    const bucket = TREE_TYPE_BY_API_TYPE[String(type || "")] || String(type || "").toLowerCase();
+    const ext = bucket ? TREE.src[kind]?.[bucket] : null;
+    return bucket && ext ? { bucket, ext } : null;
 }
 
-function withoutSourcePrefix(filePath) {
-    const prefix = `${WORKSPACE_SRC_DIR}/`;
-    return filePath.startsWith(prefix) ? filePath.slice(prefix.length) : filePath;
+function buildPath(kind, type, key) {
+    const config = getPathConfig(kind, type);
+    if (!config || !key) return null;
+    return `${PATH_ROOTS[kind]}/${config.bucket}/${key}.${config.ext}`;
 }
+
+function findPathMatch(filePath) {
+    if (filePath === IMAGES_FILE) {
+        return { kind: "content", type: "images", key: "images", ext: "json", path: filePath };
+    }
+
+    const matches = filePath.match(/^src\/([^/]+)\/([^/]+)\/(.+)\.([^/.]+)$/);
+    if (!matches) return null;
+
+    const [, kind, bucket, key, ext] = matches;
+    if (TREE.src[kind]?.[bucket] !== ext) return null;
+
+    if (bucket === "images") return null;
+
+    return { kind, type: bucket, key, ext, path: filePath };
+}
+
 
 function getFilePath(key, type) {
-    const c = TYPE_CONFIG[type];
-    return c ? withSourcePrefix(`${c.templateDir}/${key}${c.ext}`) : null;
+    const treeType = TREE_TYPE_BY_API_TYPE[String(type || "")] || String(type || "").toLowerCase();
+    const kind = Object.entries(FILE_KIND_BY_TYPE).find(([, types]) => types.includes(treeType))?.[0];
+    return kind ? buildPath(kind, type, key) : null;
 }
 
 function getModelFilePath(key, type) {
-    const c = TYPE_CONFIG[type];
-    return c && !c.noModel ? withSourcePrefix(`models/${c.dataDir}/${key}.model`) : null;
+    return buildPath("models", type, key);
 }
 
 function getContentRecordFilePath(key, type) {
-    const c = TYPE_CONFIG[type];
-    return c && key ? withSourcePrefix(`content/${c.dataDir}/${key}.json`) : null;
+    return buildPath("content", type, key);
 }
 
-function parseFilePath(filePath) {
-    const logicalPath = withoutSourcePrefix(filePath);
-    for (const [type, c] of Object.entries(TYPE_CONFIG)) {
-        const prefix = `${c.templateDir}/`;
-        if (!logicalPath.startsWith(prefix) || !logicalPath.endsWith(c.ext)) continue;
-        const key = logicalPath.slice(prefix.length, -c.ext.length);
-        if (!key) continue;
-        return { type, key };
+function validatePath(filePath) {
+    const parsed = findPathMatch(filePath);
+    if (!parsed) {
+        throw new Error(`Invalid path "${filePath}": does not match the configured TREE`);
     }
-    return null;
+    return parsed;
 }
 
-function parseModelFilePath(filePath) {
-    const logicalPath = withoutSourcePrefix(filePath);
-    if (!logicalPath.startsWith("models/")) return null;
-    const rest = logicalPath.slice(7);
-    if (!rest.endsWith(".model")) return null;
-    for (const [type, c] of Object.entries(TYPE_CONFIG)) {
-        if (c.noModel) continue;
-        const prefix = `${c.dataDir}/`;
-        if (!rest.startsWith(prefix)) continue;
-        const key = rest.slice(prefix.length, -6);
-        if (!key) continue;
-        return { type, key };
+function parsePath(filePath) {
+    try {
+        return validatePath(filePath);
+    } catch {
+        return null;
     }
-    return null;
-}
-
-function parseContentRecordFilePath(filePath) {
-    const logicalPath = withoutSourcePrefix(filePath);
-    if (!logicalPath.startsWith("content/")) return null;
-    const rest = logicalPath.slice(8);
-    if (!rest.endsWith(".json")) return null;
-    for (const [type, c] of Object.entries(TYPE_CONFIG)) {
-        const prefix = `${c.dataDir}/`;
-        if (!rest.startsWith(prefix)) continue;
-        const key = rest.slice(prefix.length, -5);
-        if (!key) continue;
-        return { type, key };
-    }
-    return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,25 +211,15 @@ function cachePaths(viewsDir) {
 }
 
 async function ensureSourceStructure(viewsDir) {
-    const sourceRoot = path.join(viewsDir, WORKSPACE_SRC_DIR);
-    const templateDirs = [...new Set(Object.values(TYPE_CONFIG).map((c) => c.templateDir))];
-    const dataDirs = [...new Set(Object.values(TYPE_CONFIG).map((c) => c.dataDir))];
-    const modelTypeDirs = [...new Set(
-        Object.values(TYPE_CONFIG)
-            .filter((c) => !c.noModel)
-            .map((c) => c.dataDir)
-    )];
-
     const requiredDirs = [
-        sourceRoot,
-        ...templateDirs.map((dir) => path.join(sourceRoot, dir)),
-        path.join(sourceRoot, "models"),
-        ...modelTypeDirs.map((dir) => path.join(sourceRoot, "models", dir)),
-        path.join(sourceRoot, "content"),
-        ...dataDirs.map((dir) => path.join(sourceRoot, "content", dir)),
+        "src",
+        ...Object.keys(PATH_ROOTS).map((kind) => PATH_ROOTS[kind]),
+        ...Object.entries(TREE.src).flatMap(([kind, bucketMap]) => Object.entries(bucketMap)
+            .filter(([, ext]) => ext !== true)
+            .map(([bucket]) => `${PATH_ROOTS[kind]}/${bucket}`)),
     ];
 
-    await Promise.all(requiredDirs.map((dir) => fs.ensureDir(dir)));
+    await Promise.all([...new Set(requiredDirs)].map((dir) => fs.ensureDir(path.join(viewsDir, dir))));
 }
 
 async function loadCache(viewsDir) {
@@ -349,7 +357,7 @@ async function syncSite(opts) {
 
 async function walkFiles(viewsDir) {
     const out = [];
-    const sourceRoot = path.join(viewsDir, WORKSPACE_SRC_DIR);
+    const sourceRoot = path.join(viewsDir, "src");
 
     if (!(await fs.pathExists(sourceRoot))) {
         return out;
@@ -388,51 +396,40 @@ async function pushLocalChanges(viewsDir, cache, api) {
     const contentFiles = [];
 
     for (const rel of localFiles) {
-        const logicalRel = withoutSourcePrefix(rel);
-        if (logicalRel.startsWith("models/")) {
-            const parsed = parseModelFilePath(rel);
-            if (parsed) modelFiles.push({ rel, parsed });
-        } else if (logicalRel.startsWith("content/")) {
-            const parsed = parseContentRecordFilePath(rel);
-            if (parsed) contentFiles.push({ rel, parsed });
-        } else {
-            const parsed = parseFilePath(rel);
-            if (parsed) templateFiles.push({ rel, parsed });
-        }
+        const parsed = parsePath(rel);
+        if (!parsed) continue;
+        if (parsed.type === "images") continue;
+        if (parsed.kind === "models") modelFiles.push({ rel, parsed });
+        else if (parsed.kind === "content") contentFiles.push({ rel, parsed });
+        else templateFiles.push({ rel, parsed });
     }
 
     let pushed = 0;
 
     // --- Images ---
-    const imagesPath = path.join(viewsDir, WORKSPACE_SRC_DIR, "images.json");
+    const imagesPath = path.join(viewsDir, IMAGES_FILE);
     if (await fs.pathExists(imagesPath)) {
         const stat = await fs.stat(imagesPath);
         const prior = cache.imagesJson;
         if (!prior || prior.mtimeMs !== stat.mtimeMs) {
-            let images;
-            try {
-                images = JSON.parse(await fs.readFile(imagesPath, "utf-8"));
-            } catch {
-                console.error(`❌ Invalid JSON in ${WORKSPACE_SRC_DIR}/images.json`);
-            }
-            if (images !== undefined) {
-                if (prior && JSON.stringify(images) === JSON.stringify(prior.data)) {
-                    cache.imagesJson = { ...prior, mtimeMs: stat.mtimeMs };
-                } else {
-                    try {
-                        const resp = await api.saveImages(images);
-                        let finalMtime = stat.mtimeMs;
-                        const currentStat = await fs.stat(imagesPath);
-                        if (currentStat.mtimeMs === stat.mtimeMs) {
-                            await fs.outputFile(imagesPath, JSON.stringify(resp, null, 2));
-                            finalMtime = (await fs.stat(imagesPath)).mtimeMs;
-                        }
-                        cache.imagesJson = { data: resp, mtimeMs: finalMtime };
-                        console.log("✅ Updated images");
-                        pushed++;
-                    } catch (err) {
-                        console.error("❌ Error saving images:", err.body || err.message);
+            const content = await fs.readFile(imagesPath, "utf-8");
+            if (prior && content === prior.content) {
+                cache.imagesJson = { ...prior, mtimeMs: stat.mtimeMs };
+            } else {
+                try {
+                    const resp = await api.saveImages({ key: "images", type: "IMAGES", content });
+                    const finalContent = resp.content ?? content;
+                    let finalMtime = stat.mtimeMs;
+                    const currentStat = await fs.stat(imagesPath);
+                    if (currentStat.mtimeMs === stat.mtimeMs) {
+                        await fs.outputFile(imagesPath, finalContent);
+                        finalMtime = (await fs.stat(imagesPath)).mtimeMs;
                     }
+                    cache.imagesJson = { key: "images", type: "IMAGES", content: finalContent, mtimeMs: finalMtime };
+                    console.log("✅ Updated images");
+                    pushed++;
+                } catch (err) {
+                    console.error("❌ Error saving images:", err.body || err.message);
                 }
             }
         }
@@ -444,19 +441,20 @@ async function pushLocalChanges(viewsDir, cache, api) {
         const prior = cache.modelMap[rel];
         const stat = await fs.stat(full);
         if (prior && prior.mtimeMs === stat.mtimeMs) continue;
-        const shape = await fs.readFile(full, "utf-8");
-        if (prior && shape === prior.shape) {
+        const content = await fs.readFile(full, "utf-8");
+        if (prior && content === prior.content) {
             cache.modelMap[rel] = { ...prior, mtimeMs: stat.mtimeMs };
             continue;
         }
         try {
-            const resp = await api.saveModel(parsed.key, parsed.type, shape);
+            const apiType = API_TYPE_BY_TREE_TYPE[parsed.type] || parsed.type;
+            const resp = await api.saveModel({ key: parsed.key, type: apiType, content });
             let finalMtime = stat.mtimeMs;
-            if (resp.shape !== shape) {
-                await fs.writeFile(full, resp.shape, "utf-8");
+            if (resp.content !== content) {
+                await fs.writeFile(full, resp.content, "utf-8");
                 finalMtime = (await fs.stat(full)).mtimeMs;
             }
-            cache.modelMap[rel] = { key: parsed.key, type: parsed.type, shape: resp.shape, mtimeMs: finalMtime };
+            cache.modelMap[rel] = { key: parsed.key, type: apiType, content: resp.content, mtimeMs: finalMtime };
             console.log(`✅ ${prior ? "Updated" : "Created"} model: ${rel}`);
             pushed++;
         } catch (err) {
@@ -470,20 +468,20 @@ async function pushLocalChanges(viewsDir, cache, api) {
         const prior = cache.fileMap[rel];
         const stat = await fs.stat(full);
         if (prior && prior.mtimeMs === stat.mtimeMs) continue;
-        const code = await fs.readFile(full, "utf-8");
-        if (prior && code === prior.code) {
+        const content = await fs.readFile(full, "utf-8");
+        if (prior && content === prior.content) {
             cache.fileMap[rel] = { ...prior, mtimeMs: stat.mtimeMs };
             continue;
         }
-
         const modelRel = getModelFilePath(parsed.key, parsed.type);
         if (modelRel && !cache.modelMap[modelRel]) {
             console.warn(`⚠️ Skipping template ${rel}: no model found`);
             continue;
         }
         try {
-            await api.saveTemplate(parsed.key, parsed.type, code);
-            cache.fileMap[rel] = { key: parsed.key, type: parsed.type, code, mtimeMs: stat.mtimeMs };
+            const apiType = API_TYPE_BY_TREE_TYPE[parsed.type] || parsed.type;
+            await api.saveTemplate({ key: parsed.key, type: apiType, content });
+            cache.fileMap[rel] = { key: parsed.key, type: apiType, content, mtimeMs: stat.mtimeMs };
             console.log(`✅ ${prior ? "Updated" : "Created"} template: ${rel}`);
             pushed++;
         } catch (err) {
@@ -497,28 +495,28 @@ async function pushLocalChanges(viewsDir, cache, api) {
         const prior = cache.contentRecordMap[rel];
         const stat = await fs.stat(full);
         if (prior && prior.mtimeMs === stat.mtimeMs) continue;
-        let item;
+        let content;
         try {
-            item = JSON5.parse(await fs.readFile(full, "utf-8"));
+            content = JSON.stringify(JSON5.parse(await fs.readFile(full, "utf-8")), null, 2);
         } catch {
             console.error(`❌ Invalid JSON in content record: ${rel}`);
             continue;
         }
-        if (prior && JSON.stringify(item) === JSON.stringify(prior.item)) {
+        if (prior && content === prior.content) {
             cache.contentRecordMap[rel] = { ...prior, mtimeMs: stat.mtimeMs };
             continue;
         }
         try {
-            const resp = await api.saveRecord(parsed.key, parsed.type, item);
-            const receivedItem = resp.item ?? item;
+            const apiType = API_TYPE_BY_TREE_TYPE[parsed.type] || parsed.type;
+            const resp = await api.saveRecord({ key: parsed.key, type: apiType, content });
+            const finalContent = resp.content ?? content;
             let finalMtime = stat.mtimeMs;
-            // Write server response back to file unless file was modified while save was in-flight
             const currentStat = await fs.stat(full);
             if (currentStat.mtimeMs === stat.mtimeMs) {
-                await fs.outputFile(full, JSON.stringify(receivedItem, null, 2));
+                await fs.outputFile(full, finalContent);
                 finalMtime = (await fs.stat(full)).mtimeMs;
             }
-            cache.contentRecordMap[rel] = { key: parsed.key, type: parsed.type, item: receivedItem, mtimeMs: finalMtime };
+            cache.contentRecordMap[rel] = { key: parsed.key, type: apiType, content: finalContent, mtimeMs: finalMtime };
             console.log(`✅ ${prior ? "Updated" : "Created"} content record: ${rel}`);
             pushed++;
         } catch (err) {
@@ -533,65 +531,56 @@ async function pushLocalChanges(viewsDir, cache, api) {
 // Pull
 // ---------------------------------------------------------------------------
 
+async function pullItems(viewsDir, items, getPath, oldMap) {
+    const newMap = {};
+    let pulled = 0;
+    for (const item of items) {
+        const rel = getPath(item.key, item.type);
+        if (!rel) continue;
+        const full = path.join(viewsDir, rel);
+        const prior = oldMap[rel];
+        let mtimeMs = prior?.mtimeMs;
+        if (!prior || prior.content !== item.content) {
+            await fs.outputFile(full, item.content);
+            mtimeMs = (await fs.stat(full)).mtimeMs;
+            pulled++;
+        } else if (mtimeMs == null) {
+            try { mtimeMs = (await fs.stat(full)).mtimeMs; } catch {}
+        }
+        newMap[rel] = { key: item.key, type: item.type, content: item.content, mtimeMs };
+    }
+    return { newMap, pulled };
+}
+
+async function removeStale(viewsDir, oldMap, newMap, label) {
+    for (const rel of Object.keys(oldMap)) {
+        if (!newMap[rel]) {
+            try { await fs.unlink(path.join(viewsDir, rel)); } catch {}
+            console.log(`🗑️  Removed ${label} (deleted on server): ${rel}`);
+        }
+    }
+}
+
 async function pullServerState(viewsDir, cache, api) {
     let pulled = 0;
 
     // --- Templates ---
     console.log("📥 Fetching templates...");
     const templates = await api.fetchTemplates();
-    const newFileMap = {};
-    for (const t of templates) {
-        const rel = getFilePath(t.key, t.type);
-        if (!rel) continue;
-        const full = path.join(viewsDir, rel);
-        const prior = cache.fileMap[rel];
-        let mtimeMs = prior?.mtimeMs;
-        if (!prior || prior.code !== t.code) {
-            await fs.outputFile(full, t.code);
-            mtimeMs = (await fs.stat(full)).mtimeMs;
-            pulled++;
-        } else if (mtimeMs == null) {
-            try { mtimeMs = (await fs.stat(full)).mtimeMs; } catch {}
-        }
-        newFileMap[rel] = { key: t.key, type: t.type, code: t.code, mtimeMs };
-    }
-    for (const rel of Object.keys(cache.fileMap)) {
-        if (!newFileMap[rel]) {
-            try { await fs.unlink(path.join(viewsDir, rel)); } catch {}
-            console.log(`🗑️  Removed template (deleted on server): ${rel}`);
-        }
-    }
+    const { newMap: newFileMap, pulled: tPulled } = await pullItems(viewsDir, templates, getFilePath, cache.fileMap);
+    await removeStale(viewsDir, cache.fileMap, newFileMap, "template");
     cache.fileMap = newFileMap;
+    pulled += tPulled;
     console.log(`✔️ Synced ${templates.length} template(s).`);
 
     // --- Models ---
     try {
         console.log("📥 Fetching models...");
         const models = await api.fetchModels();
-        const newModelMap = {};
-        for (const m of models) {
-            const rel = getModelFilePath(m.key, m.type);
-            if (!rel) continue;
-            const full = path.join(viewsDir, rel);
-            const shape = typeof m.shape === "string" ? m.shape : JSON.stringify(m.shape, null, 2);
-            const prior = cache.modelMap[rel];
-            let mtimeMs = prior?.mtimeMs;
-            if (!prior || prior.shape !== shape) {
-                await fs.outputFile(full, shape);
-                mtimeMs = (await fs.stat(full)).mtimeMs;
-                pulled++;
-            } else if (mtimeMs == null) {
-                try { mtimeMs = (await fs.stat(full)).mtimeMs; } catch {}
-            }
-            newModelMap[rel] = { key: m.key, type: m.type, shape, mtimeMs };
-        }
-        for (const rel of Object.keys(cache.modelMap)) {
-            if (!newModelMap[rel]) {
-                try { await fs.unlink(path.join(viewsDir, rel)); } catch {}
-                console.log(`🗑️  Removed model (deleted on server): ${rel}`);
-            }
-        }
+        const { newMap: newModelMap, pulled: mPulled } = await pullItems(viewsDir, models, getModelFilePath, cache.modelMap);
+        await removeStale(viewsDir, cache.modelMap, newModelMap, "model");
         cache.modelMap = newModelMap;
+        pulled += mPulled;
         console.log(`✔️ Synced ${Object.keys(newModelMap).length} model(s).`);
     } catch (err) {
         console.warn("⚠️ Could not fetch models:", err.body || err.message);
@@ -601,31 +590,10 @@ async function pullServerState(viewsDir, cache, api) {
     try {
         console.log("📥 Fetching content records...");
         const records = await api.fetchContentRecords();
-        const newMap = {};
-        for (const r of records) {
-            const rel = getContentRecordFilePath(r.key, r.type);
-            if (!rel) continue;
-            const full = path.join(viewsDir, rel);
-            const content = JSON.stringify(r.item, null, 2);
-            const prior = cache.contentRecordMap[rel];
-            const priorContent = prior ? JSON.stringify(prior.item, null, 2) : null;
-            let mtimeMs = prior?.mtimeMs;
-            if (priorContent !== content) {
-                await fs.outputFile(full, content);
-                mtimeMs = (await fs.stat(full)).mtimeMs;
-                pulled++;
-            } else if (mtimeMs == null) {
-                try { mtimeMs = (await fs.stat(full)).mtimeMs; } catch {}
-            }
-            newMap[rel] = { key: r.key, type: r.type, item: r.item, mtimeMs };
-        }
-        for (const rel of Object.keys(cache.contentRecordMap)) {
-            if (!newMap[rel]) {
-                try { await fs.unlink(path.join(viewsDir, rel)); } catch {}
-                console.log(`🗑️  Removed content record (deleted on server): ${rel}`);
-            }
-        }
+        const { newMap, pulled: rPulled } = await pullItems(viewsDir, records, getContentRecordFilePath, cache.contentRecordMap);
+        await removeStale(viewsDir, cache.contentRecordMap, newMap, "content record");
         cache.contentRecordMap = newMap;
+        pulled += rPulled;
         console.log(`✔️ Synced ${Object.keys(newMap).length} content record(s).`);
     } catch (err) {
         console.warn("⚠️ Could not fetch content records:", err.body || err.message);
@@ -635,20 +603,17 @@ async function pullServerState(viewsDir, cache, api) {
     try {
         console.log("📥 Fetching images...");
         const images = await api.fetchImages();
-        console.log("🖼️ Fetched images:", images);
-        const imagesPath = path.join(viewsDir, WORKSPACE_SRC_DIR, "images.json");
-        const content = JSON.stringify(images, null, 2);
+        const imagesPath = path.join(viewsDir, IMAGES_FILE);
         const prior = cache.imagesJson;
-        const priorContent = prior ? JSON.stringify(prior.data, null, 2) : null;
         let mtimeMs = prior?.mtimeMs;
-        if (priorContent !== content) {
-            await fs.outputFile(imagesPath, content);
+        if (!prior || prior.content !== images.content) {
+            await fs.outputFile(imagesPath, images.content);
             mtimeMs = (await fs.stat(imagesPath)).mtimeMs;
             pulled++;
         } else if (mtimeMs == null) {
             try { mtimeMs = (await fs.stat(imagesPath)).mtimeMs; } catch {}
         }
-        cache.imagesJson = { data: images, mtimeMs };
+        cache.imagesJson = { key: images.key, type: images.type, content: images.content, mtimeMs };
         console.log("✔️ Synced images.");
     } catch (err) {
         console.warn("⚠️ Could not fetch images:", err.body || err.message);
@@ -670,9 +635,8 @@ module.exports = {
     getFilePath,
     getModelFilePath,
     getContentRecordFilePath,
-    parseFilePath,
-    parseModelFilePath,
-    parseContentRecordFilePath,
+    validatePath,
+    parsePath,
 };
 
 if (require.main === module) {

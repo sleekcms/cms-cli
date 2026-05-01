@@ -11,9 +11,8 @@ const {
     getFilePath,
     getModelFilePath,
     getContentRecordFilePath,
-    parseFilePath,
-    parseModelFilePath,
-    parseContentRecordFilePath,
+    validatePath,
+    parsePath,
 } = require("../setup-site");
 
 // ---------------------------------------------------------------------------
@@ -26,45 +25,59 @@ test("kebabCase lowercases and replaces spaces/underscores", () => {
 });
 
 test("getFilePath maps type+key to dir/key.ext", () => {
-    assert.equal(getFilePath("home", "PAGE"), "src/views/pages/home.ejs");
-    assert.equal(getFilePath("hero", "BLOCK"), "src/views/blocks/hero.ejs");
+    assert.equal(getFilePath("home", "PAGES"), "src/views/pages/home.ejs");
+    assert.equal(getFilePath("hero", "BLOCKS"), "src/views/blocks/hero.ejs");
     assert.equal(getFilePath("main", "CSS"), "src/public/css/main.css");
     assert.equal(getFilePath("x", "UNKNOWN"), null);
 });
 
 test("getModelFilePath returns null for noModel types", () => {
-    assert.equal(getModelFilePath("home", "PAGE"), "src/models/pages/home.model");
+    assert.equal(getModelFilePath("home", "PAGES"), "src/models/pages/home.model");
     assert.equal(getModelFilePath("main", "CSS"), null);
     assert.equal(getModelFilePath("main", "JS"), null);
     assert.equal(getModelFilePath("main", "BASE"), null);
 });
 
 test("getContentRecordFilePath", () => {
-    assert.equal(getContentRecordFilePath("home", "PAGE"), "src/content/pages/home.json");
+    assert.equal(getContentRecordFilePath("home", "PAGES"), "src/content/pages/home.json");
     assert.equal(getContentRecordFilePath("", "PAGE"), null);
     assert.equal(getContentRecordFilePath("x", "NOPE"), null);
 });
 
-test("parseFilePath round-trips with getFilePath", () => {
-    assert.deepEqual(parseFilePath("src/views/pages/home.ejs"), { type: "PAGE", key: "home" });
-    assert.deepEqual(parseFilePath("src/public/css/main.css"), { type: "CSS", key: "main" });
-    assert.deepEqual(parseFilePath("src/views/blocks/nested/card.ejs"), { type: "BLOCK", key: "nested/card" });
-    assert.equal(parseFilePath("unknown/x.ejs"), null);
-    assert.equal(parseFilePath("orphan.ejs"), null);
+test("parsePath identifies templates", () => {
+    assert.deepEqual(parsePath("src/views/pages/home.ejs"), { kind: "views", type: "pages", key: "home", ext: "ejs", path: "src/views/pages/home.ejs" });
+    assert.deepEqual(parsePath("src/public/css/main.css"), { kind: "public", type: "css", key: "main", ext: "css", path: "src/public/css/main.css" });
+    assert.deepEqual(parsePath("src/views/blocks/nested/card.ejs"), { kind: "views", type: "blocks", key: "nested/card", ext: "ejs", path: "src/views/blocks/nested/card.ejs" });
+    assert.equal(parsePath("unknown/x.ejs"), null);
+    assert.equal(parsePath("orphan.ejs"), null);
 });
 
-test("parseModelFilePath", () => {
-    assert.deepEqual(parseModelFilePath("src/models/pages/home.model"), { type: "PAGE", key: "home" });
-    assert.equal(parseModelFilePath("pages/home.model"), null);
-    assert.equal(parseModelFilePath("src/models/pages/home.ejs"), null);
-    assert.equal(parseModelFilePath("src/models/unknown/home.model"), null);
+test("parsePath identifies models", () => {
+    assert.deepEqual(parsePath("src/models/pages/home.model"), { kind: "models", type: "pages", key: "home", ext: "model", path: "src/models/pages/home.model" });
+    assert.equal(parsePath("models/pages/home.model"), null);
+    assert.equal(parsePath("src/models/pages/home.ejs"), null);
+    assert.equal(parsePath("src/models/unknown/home.model"), null);
 });
 
-test("parseContentRecordFilePath", () => {
-    assert.deepEqual(parseContentRecordFilePath("src/content/pages/home.json"), { type: "PAGE", key: "home" });
-    assert.equal(parseContentRecordFilePath("content/home.json"), null);
-    assert.equal(parseContentRecordFilePath("src/content/pages/home.ejs"), null);
-    assert.equal(parseContentRecordFilePath("src/content/unknown/home.json"), null);
+test("parsePath identifies content records", () => {
+    assert.deepEqual(parsePath("src/content/pages/home.json"), { kind: "content", type: "pages", key: "home", ext: "json", path: "src/content/pages/home.json" });
+    assert.deepEqual(parsePath("src/content/images.json"), { kind: "content", type: "images", key: "images", ext: "json", path: "src/content/images.json" });
+    assert.equal(parsePath("content/home.json"), null);
+    assert.equal(parsePath("src/content/pages/home.ejs"), null);
+    assert.equal(parsePath("src/content/unknown/home.json"), null);
+});
+
+test("validatePath returns parsed path for valid inputs", () => {
+    assert.deepEqual(validatePath("src/views/pages/home.ejs"), { kind: "views", type: "pages", key: "home", ext: "ejs", path: "src/views/pages/home.ejs" });
+    assert.deepEqual(validatePath("src/models/pages/home.model"), { kind: "models", type: "pages", key: "home", ext: "model", path: "src/models/pages/home.model" });
+    assert.deepEqual(validatePath("src/content/pages/home.json"), { kind: "content", type: "pages", key: "home", ext: "json", path: "src/content/pages/home.json" });
+    assert.deepEqual(validatePath("src/content/images.json"), { kind: "content", type: "images", key: "images", ext: "json", path: "src/content/images.json" });
+});
+
+test("validatePath throws for invalid inputs", () => {
+    assert.throws(() => validatePath("unknown/x.ejs"), /does not match the configured TREE/);
+    assert.throws(() => validatePath("src/models/pages/home.ejs"), /does not match the configured TREE/);
+    assert.throws(() => validatePath("src/content/unknown/home.json"), /does not match the configured TREE/);
 });
 
 test("resolveViewsDir builds slug from site name + id", () => {
@@ -137,14 +150,14 @@ test("syncSite: first run creates workspace, pulls files, writes cache + aux", a
 
     global.fetch = makeFetchStub(defaultRoutes({
         [`GET ${BASE}/ai_tools/get_templates`]: async () => [
-            { key: "home", type: "PAGE", code: "<h1>Home</h1>" },
-            { key: "main", type: "CSS",  code: "body{}" },
+            { key: "home", type: "PAGE", content: "<h1>Home</h1>" },
+            { key: "main", type: "css",  content: "body{}" },
         ],
         [`GET ${BASE}/ai_tools/get_models`]: async () => [
-            { key: "home", type: "PAGE", shape: "{ title: string }" },
+            { key: "home", type: "PAGE", content: "{ title: string }" },
         ],
         [`GET ${BASE}/ai_tools/get_records`]: async () => [
-            { key: "home", type: "PAGE", item: { title: "Hello" } },
+            { key: "home", type: "PAGE", content: JSON.stringify({ title: "Hello" }, null, 2) },
         ],
     }));
 
@@ -178,9 +191,6 @@ test("syncSite: first run creates workspace, pulls files, writes cache + aux", a
             "src/views/entries",
             "src/views/blocks",
             "src/views/layouts",
-            "src/public",
-            "src/public/js",
-            "src/public/css",
             "src/models",
             "src/models/pages",
             "src/models/entries",
@@ -188,10 +198,9 @@ test("syncSite: first run creates workspace, pulls files, writes cache + aux", a
             "src/content",
             "src/content/pages",
             "src/content/entries",
-            "src/content/blocks",
-            "src/content/js",
-            "src/content/css",
-            "src/content/layouts",
+            "src/public",
+            "src/public/js",
+            "src/public/css",
         ];
         for (const rel of requiredDirs) {
             assert.ok(await fs.pathExists(path.join(ws, rel)), `missing directory: ${rel}`);
@@ -237,14 +246,14 @@ test("syncSite: second run pushes local edits and skips unchanged files", async 
 
     global.fetch = makeFetchStub(defaultRoutes({
         [`GET ${BASE}/ai_tools/get_templates`]: async () => [
-            { key: "home", type: "PAGE", code: "<h1>Home</h1>" },
+            { key: "home", type: "PAGE", content: "<h1>Home</h1>" },
         ],
         [`GET ${BASE}/ai_tools/get_models`]: async () => [
-            { key: "home", type: "PAGE", shape: "{ title: string }" },
+            { key: "home", type: "PAGE", content: "{ title: string }" },
         ],
         [`POST ${BASE}/ai_tools/save_template`]: async (body) => { saved.templates.push(body); return { ok: true }; },
-        [`POST ${BASE}/ai_tools/save_model`]:    async (body) => { saved.models.push(body);    return { shape: body.shape }; },
-        [`POST ${BASE}/ai_tools/save_record`]:   async (body) => { saved.records.push(body);   return { item: body.item }; },
+        [`POST ${BASE}/ai_tools/save_model`]:    async (body) => { saved.models.push(body);    return { content: body.content }; },
+        [`POST ${BASE}/ai_tools/save_record`]:   async (body) => { saved.records.push(body);   return { content: body.content }; },
     }));
 
     await withTempDir(async (tmp) => {
@@ -268,9 +277,9 @@ test("syncSite: second run pushes local edits and skips unchanged files", async 
         assert.equal(saved.models.length, 1);
         assert.equal(saved.models[0].key, "home");
         assert.equal(saved.templates.length, 1);
-        assert.equal(saved.templates[0].code, "<h1>Edited</h1>");
+        assert.equal(saved.templates[0].content, "<h1>Edited</h1>");
         assert.equal(saved.records.length, 1);
-        assert.deepEqual(saved.records[0].item, { title: "X" });
+        assert.equal(saved.records[0].content, JSON.stringify({ title: "X" }, null, 2));
 
         // Third run with no local changes: nothing pushed
         saved.templates.length = 0;
@@ -288,8 +297,8 @@ test("syncSite: server-deleted templates are NOT removed on incremental sync (pu
     t.after(() => { global.fetch = origFetch; });
 
     let templates = [
-        { key: "home",  type: "PAGE", code: "h" },
-        { key: "about", type: "PAGE", code: "a" },
+        { key: "home",  type: "PAGE", content: "h" },
+        { key: "about", type: "PAGE", content: "a" },
     ];
     global.fetch = makeFetchStub(defaultRoutes({
         [`GET ${BASE}/ai_tools/get_templates`]: async () => templates,
@@ -302,7 +311,7 @@ test("syncSite: server-deleted templates are NOT removed on incremental sync (pu
 
         // Simulate server-side delete — but incremental sync only pushes, so the
         // local file is NOT removed. Re-run setup-site to re-pull from server.
-        templates = [{ key: "home", type: "PAGE", code: "h" }];
+        templates = [{ key: "home", type: "PAGE", content: "h" }];
         await syncSite({ token: "tok", viewsDir: ws });
 
         assert.ok(await fs.pathExists(path.join(ws, "src/views/pages/about.ejs")));
