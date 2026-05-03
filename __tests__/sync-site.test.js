@@ -61,8 +61,8 @@ const BASE = "https://app.sleekcms.com/api";
 
 function defaultRoutes(overrides = {}) {
     return {
-        [`GET ${BASE}/ai_tools/get_site`]: async () => SITE,
-        [`GET ${BASE}/ai_tools/get_files`]: async () => [],
+        [`GET ${BASE}/mcp/get_site`]: async () => SITE,
+        [`GET ${BASE}/mcp/get_files`]: async () => [],
         ...overrides,
     };
 }
@@ -76,7 +76,7 @@ test("syncSite: first run creates workspace, pulls files, writes cache + aux", a
     t.after(() => { global.fetch = origFetch; });
 
     global.fetch = makeFetchStub(defaultRoutes({
-        [`GET ${BASE}/ai_tools/get_files`]: async () => [
+        [`GET ${BASE}/mcp/get_files`]: async () => [
             { path: "src/views/pages/home.ejs",     content: "<h1>Home</h1>" },
             { path: "src/public/css/main.css",      content: "body{}" },
             { path: "src/models/pages/home.model",  content: "{ title: string }" },
@@ -167,11 +167,11 @@ test("syncSite: second run pushes local edits and skips unchanged files", async 
     const saveCalls = []; // each call captures the request body (array of files)
 
     global.fetch = makeFetchStub(defaultRoutes({
-        [`GET ${BASE}/ai_tools/get_files`]: async () => [
+        [`GET ${BASE}/mcp/get_files`]: async () => [
             { path: "src/views/pages/home.ejs",    content: "<h1>Home</h1>" },
             { path: "src/models/pages/home.model", content: "{ title: string }" },
         ],
-        [`POST ${BASE}/ai_tools/save_files`]: async (body) => {
+        [`POST ${BASE}/mcp/save_files`]: async (body) => {
             saveCalls.push(body);
             return body.map((f) => ({ path: f.path, content: f.content, error: null }));
         },
@@ -220,7 +220,7 @@ test("syncSite: server-deleted templates are NOT removed on incremental sync (pu
         { path: "src/views/pages/about.ejs", content: "a" },
     ];
     global.fetch = makeFetchStub(defaultRoutes({
-        [`GET ${BASE}/ai_tools/get_files`]: async () => files,
+        [`GET ${BASE}/mcp/get_files`]: async () => files,
     }));
 
     await withTempDir(async (tmp) => {
@@ -244,7 +244,7 @@ test("syncSite: template push does not require a matching model", async (t) => {
 
     const saveCalls = [];
     global.fetch = makeFetchStub(defaultRoutes({
-        [`POST ${BASE}/ai_tools/save_files`]: async (body) => {
+        [`POST ${BASE}/mcp/save_files`]: async (body) => {
             saveCalls.push(body);
             return body.map((f) => ({ path: f.path, content: f.content, error: null }));
         },
@@ -271,7 +271,7 @@ test("syncSite: images-only edit produces a save_files request with just the ima
 
     const saveCalls = [];
     global.fetch = makeFetchStub(defaultRoutes({
-        [`POST ${BASE}/ai_tools/save_files`]: async (body) => {
+        [`POST ${BASE}/mcp/save_files`]: async (body) => {
             saveCalls.push(body);
             return body.map((f) => ({ path: f.path, content: f.content, error: null }));
         },
