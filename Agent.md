@@ -343,6 +343,19 @@ Page records include: `item._path`, `item._slug` (collections), `item._meta.upda
 
 `attr` can be `"WxH"` string or `{ w, h, size, fit, type, class, style }` object.
 
+### Location
+
+`location` fields can be passed to image helpers for static maps, embedded maps, or marker data.
+
+| Function | Returns | Description |
+|---|---|---|
+| `src(loc, attr)` | URL string | Static map URL |
+| `img(loc, attr)` | HTML string | Static map `<img>` |
+| `embed(loc, attr?)` | HTML string | Google Maps `<iframe>` |
+| `markers(loc)` | `{ lat, lng }[]` | Marker coordinates |
+
+`attr` can be `"WxH"` or `{ w, h, size, zoom, maptype, scale, class, style }`.
+
 ### Head Injection
 
 Call from **any template** (page, block, entry, or layout). Deduplicated automatically.
