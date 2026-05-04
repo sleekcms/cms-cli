@@ -14,25 +14,25 @@ The **file name** (key) links a model to its template and determines the URL pat
 
 ## File Naming Convention
 
-Keys are lowercase, dash-separated. For pages, `_` in the key maps to `/` in the URL. A `[]` suffix marks a collection.
+Keys are lowercase, dash-separated. For pages, `_` in the key maps to `/` in the URL. A `+` suffix marks a collection.
 
 | File key | URL |
 |---|---|
 | `_index` | `/` (home) |
 | `about` | `/about` |
-| `blog[]` | `/blog/<slug>` (one page per entry) |
+| `blog+` | `/blog/<slug>` (one page per entry) |
 | `docs_getting-started` | `/docs/getting-started` |
 
-The keys for model, template, and content file are the same — if the model is a **collection**, the `[]` suffix is part of the key and must appear on **every** related file.
+The keys for model, template, and content file are the same — if the model is a **collection**, the `+` suffix is part of the key and must appear on **every** related file.
 
 Examples:
-- Collection page `blog`: `models/pages/blog[].model`, `pages/blog[].ejs`, `content/pages/blog[]/<slug>.json`
-- Collection entry `testimonials`: `models/entries/testimonials[].model`, `entries/testimonials[].ejs`, `content/entries/testimonials[].json`
-- Single page `about`: `models/pages/about.model`, `pages/about.ejs`, `content/pages/about.json` (no `[]`)
+- Collection page `blog`: `models/pages/blog+.model`, `pages/blog+.ejs`, `content/pages/blog+/<slug>.json`
+- Collection entry `testimonials`: `models/entries/testimonials+.model`, `entries/testimonials+.ejs`, `content/entries/testimonials+.json`
+- Single page `about`: `models/pages/about.model`, `pages/about.ejs`, `content/pages/about.json` (no `+`)
 
 ---
 
-## Folder Structure
+## Folder Structure within src/
 
 ```
 /models/pages/<key>.model      Page content models
@@ -49,11 +49,11 @@ Examples:
 /js/<name>.js                  Scripts (require head injection)
 
 /content/pages/<key>.json          Content for a single (non-list) page
-/content/pages/<key>/<slug>.json   Content for one item of a collection page (<key> ends with [])
+/content/pages/<key>/<slug>.json   Content for one item of a collection page (<key> ends with +)
 /content/entries/<key>.json        Content for a single entry (object)
-/content/entries/<key>[].json      Content for a collection entry (array of objects; <key>[] matches the model filename)
+/content/entries/<key+>.json       Content for a collection entry (array of objects; <key>+ matches the model filename)
 
-/images.json                       Site-level reusable images (handle → shortcut)
+/content/images.json                       Site-level reusable images (handle → shortcut)
 ```
 
 > **Tailwind**: Creating `/css/tailwind.css` enables Tailwind. It is compiled and injected automatically — do NOT add it via `link()`.
@@ -71,7 +71,7 @@ Examples:
 | **Entry** | Shared/reusable data (nav, footer, authors) | No | `models/entries/<key>.model` |
 | **Block** | Reusable field group embedded in pages/entries | No | `models/blocks/<key>.model` |
 
-All three can be **single** (one record) or **collection** (many records, key ends with `[]`).
+All three can be **single** (one record) or **collection** (many records, key ends with `+`).
 
 ### .model File Format
 
@@ -122,29 +122,29 @@ JSON structure without quotes on keys or string values. Scalar values are the fi
 }
 ```
 
-### Field Types
+### Field Types and Serialization
 
-| Type | Returns |
+Model fields declare both the editor type and the shape expected in content JSON. Templates receive those same values, except image shortcuts are resolved to full image objects and entry references are resolved to entry object(s).
+
+| Model type | Content JSON value / template value |
 |---|---|
-| `text` | String |
-| `paragraph` | String (multiline) |
-| `richtext` | HTML string |
-| `markdown` | Markdown string (use `marked()` to convert to HTML). Inside markdown, use the same image shortcut convention inside standard image syntax: `![alt](pexels:doctor)`. To set the image's alt, append `\|<alt>` — and any `<width>x<height>` pattern in the description sets the URL's `w`/`h` (defaults to `600x400`). E.g. `![doctor](pexels:doctor\|Smiling doctor 800x600)`. |
+| `text`, `paragraph`, `richtext`, `markdown`, `code`, `color`, `link` | String |
 | `number` | Number |
 | `boolean` | `true` / `false` |
-| `date` | `YYYY-MM-DD` |
+| `date` | `"YYYY-MM-DD"` string |
 | `datetime` | ISO 8601 string |
-| `time` | `HH:mm` |
-| `color` | String (hex or name) |
-| `link` | URL string or relative path |
-| `image` | `{ url, alt }` |
-| `video` | `{ url, embed }` |
-| `code` | String |
+| `time` | `"HH:mm"` string |
+| `image` | Either a resolved `{ "url": "...", "alt": "..." }` object, **or** a shortcut string `"<source>:<search>"` (e.g., `"pexels:doctor"`, `"url:https://picsum.photos/200.jpg"`, `"cms:logo"`). Supported sources: `unsplash`, `pexels`, `pixabay`, `iconify`, `url`, `cms` (reuses an image declared in `/images.json` by handle). Append `\|<alt text>` to set the image's alt, e.g. `"pexels:doctor\|Smiling doctor with stethoscope"`. On save, the sync engine resolves the shortcut/link to a full image object automatically. |
+| `video` | `{ "url": "...", "embed": "..." }` |
 | `json` | Object or array |
 | `sheet` | Array of arrays |
-| `location` | `{ latitude, longitude }` |
-| `block(key)` | Block object |
-| `entry(key)` | Entry object(s) |
+| `location` | `{ "latitude": n, "longitude": n }` |
+| `block(key)` | Object matching that block's model (embedded, not a reference) |
+| `entry(key)` / `[entry(key)]` | Slug string / array of slug strings in content JSON; entry object / array of entry objects in templates |
+| Group `{ ... }` | Nested object |
+| Collection `[{ ... }]` | Array of nested objects |
+
+`richtext` returns HTML; output it with `<%- %>`. `markdown` returns raw markdown; convert it with `marked()` before output. Inside markdown, use the same image shortcut convention in standard image syntax: `![alt](pexels:doctor)`. Append `\|<alt>` to set alt text, and include a `<width>x<height>` token to set URL `w`/`h` params (defaults to `600x400`), e.g. `![doctor](pexels:doctor\|Smiling doctor 800x600)`.
 
 ---
 
@@ -159,31 +159,9 @@ Content files are JSON records under `/content/` that hold the actual values for
 | Model shape | File path | JSON top-level |
 |---|---|---|
 | Single page (e.g., `about`) | `content/pages/about.json` | Object |
-| Collection page (e.g., `blog[]`) | `content/pages/blog[]/<slug>.json` (the `[]` is part of the key, not an extra suffix) | Object; one file per slug |
+| Collection page (e.g., `blog+`) | `content/pages/blog+/<slug>.json` (the `+` is part of the key, not an extra suffix) | Object; one file per slug |
 | Single entry (e.g., `header`) | `content/entries/header.json` | Object |
-| Collection entry (e.g., `authors`) | `content/entries/authors[].json` (the `[]` is part of the key — same as the model filename) | Array of objects |
-
-### Field serialization
-
-How values in content JSON map to the types declared in the model:
-
-| Model type | JSON value |
-|---|---|
-| `text`, `paragraph`, `richtext`, `markdown`, `code`, `color`, `link` | String |
-| `number` | Number |
-| `boolean` | `true` / `false` |
-| `date` | `"YYYY-MM-DD"` string |
-| `datetime` | ISO 8601 string |
-| `time` | `"HH:mm"` string |
-| `image` | Either a resolved `{ "url": "...", "alt": "..." }` object, **or** a shortcut string `"<source>:<search>"` (e.g., `"pexels:doctor"`, `"url:https://picsum.photos/200.jpg"`, `"cms:logo"`). Supported sources: `unsplash`, `pexels`, `pixabay`, `iconify`, `url`, `cms` (reuses an image declared in `/images.json` by handle). Append `\|<alt text>` to set the image's alt, e.g. `"pexels:doctor\|Smiling doctor with stethoscope"`. On save, the sync engine resolves the shortcut/link to a full image object automatically. |
-| `video` | `{ "url": "...", "embed": "..." }` |
-| `json` | Object or array |
-| `sheet` | Array of arrays |
-| `location` | `{ "latitude": n, "longitude": n }` |
-| `block(key)` | Object matching that block's model (embedded, not a reference) |
-| `entry(key)` / `[entry(key)]` | Slug string / array of slug strings referencing entries by handle |
-| Group `{ ... }` | Nested object |
-| Collection `[{ ... }]` | Array of nested objects |
+| Collection entry (e.g., `authors`) | `content/entries/authors+.json` (the `+` is part of the key — same as the model filename) | Array of objects |
 
 ### Example
 
@@ -480,10 +458,9 @@ Template:
 4. Use modern design with tailwind unless design details are specified.
 5. To change what appears on a page or in shared data, edit the matching JSON under `/content/` — do **not** hard-code content into `.ejs` templates. Templates define structure; content files hold the values.
 6. Fields in a content JSON file must match the keys defined in the corresponding `.model`. Adding a new field requires updating the `.model` first.
-7. Collection page items each live in their own file under `content/pages/<key>/<slug>.json` — the collection key already includes `[]` (e.g., `content/pages/blog[]/my-post.json`). The `<slug>` filename is the URL segment; renaming the file renames the URL.
-8. **Collection key suffix `[]` is mandatory and must appear on every related file.** For a collection model (pages or entries — e.g., `blog`, `testimonials`, `authors`), the key `<name>[]` is part of the filename on the model, template, **and** content JSON: `models/entries/testimonials[].model`, `entries/testimonials[].ejs`, `content/entries/testimonials[].json` (array). Same rule for collection pages: `models/pages/blog[].model`, `pages/blog[].ejs`, and one file per slug under `content/pages/blog[]/<slug>.json`. Never drop the `[]` — files without it are treated as singles and will not resolve.
+7. Collection page items each live in their own file under `content/pages/<key>/<slug>.json` — the collection key already includes `+` (e.g., `content/pages/blog+/my-post.json`). The `<slug>` filename is the URL segment; renaming the file renames the URL.
+8. **Collection key suffix `+` is mandatory and must appear on every related file.** For a collection model (pages or entries — e.g., `blog`, `testimonials`, `authors`), the key `<name>+` is part of the filename on the model, template, **and** content JSON: `models/entries/testimonials+.model`, `entries/testimonials+.ejs`, `content/entries/testimonials+.json` (array). Same rule for collection pages: `models/pages/blog+.model`, `pages/blog+.ejs`, and one file per slug under `content/pages/blog+/<slug>.json`. Never drop the `+` — files without it are treated as singles and will not resolve.
 9. For `image` fields in content JSON, prefer the shortcut form `"<source>:<search>"` (sources: `unsplash`, `pexels`, `pixabay`, `iconify`) — e.g., `"pexels:doctor"`. Add alt text by appending `|<alt>` to the shortcut: `"pexels:doctor|Smiling doctor with stethoscope"`. The sync engine resolves it to a full `{ url, alt }` object on save. When the same image is reused across pages (logos, shared icons, recurring art), declare it once in `/images.json` and reference it via `"cms:<handle>"`.
 12. Inside `markdown` fields, embed images with `![alt](<source>:<search>)` — same sources as image fields. Append `|<alt>` to store alt on the image record (e.g. `![doctor](pexels:doctor|Friendly family doctor)`). Including a `<W>x<H>` token in the description (e.g. `|hero shot 1200x600`) sets the rendered URL's `w` and `h` query params; otherwise the default is `600x400`. On save, refs are rewritten to actual CDN URLs and the underlying image record is created automatically.
 10. Always create RSS feed for blogs and link them in meta so it is discoverable. Use "rss.xml" as the key.
 11. Make the sites extremely SEO friendly and sharing friendly
-
