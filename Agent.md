@@ -10,6 +10,8 @@ Each page = **model** (schema) + **template** (EJS) + optional **layout** (EJS w
 
 The **file name** (key) links a model to its template and determines the URL path.
 
+Sync/build errors are written to `sync-errors.log` in the workspace root. If a save does not render or deploy as expected, check that file first.
+
 ---
 
 ## File Naming Convention
@@ -37,7 +39,7 @@ Examples:
 ```
 /models/pages/<key>.model      Page content models
 /models/entries/<key>.model    Entry content models
-/models/blocks/<key>.model     Block content models
+/models/blocks/<key>.model     Block component models
 
 /pages/<key>.ejs               Page templates
 /entries/<key>.ejs             Entry templates
@@ -69,9 +71,9 @@ Examples:
 |---|---|---|---|
 | **Page** | Routable content | Yes | `models/pages/<key>.model` |
 | **Entry** | Shared/reusable data (nav, footer, authors) | No | `models/entries/<key>.model` |
-| **Block** | Reusable field group embedded in pages/entries | No | `models/blocks/<key>.model` |
+| **Block** | Reusable component schema embedded in pages/entries | No | `models/blocks/<key>.model` |
 
-All three can be **single** (one record) or **collection** (many records, key ends with `+`).
+Pages and entries can be **single** (one record) or **collection** (many records, key ends with `+`). Blocks are embedded component definitions; they do not have their own top-level content records.
 
 ### .model File Format
 
@@ -107,18 +109,91 @@ JSON structure without quotes on keys or string values. Scalar values are the fi
 }
 ```
 
-**Block reference** — Use `block(key)`:
+**Block field** — Use `block(key)` to embed one reusable block schema, or `[block(key)]` for a repeatable list of the same block:
 ```
 {
-    cta: block(cta)
+    cta: block(cta),
+    ctas: [block(cta)]
 }
 ```
+
+### Blocks
+
+Blocks are reusable components made from two files:
+
+- `models/blocks/<key>.model` defines the fields editors can fill in.
+- `blocks/<key>.ejs` defines how that block renders.
+
+A block does **not** own content. There is never a `content/blocks/...` file. Instead, each page or entry that declares `block(key)` or `[block(key)]` stores its own copy of that block's field values inside its own content JSON. The reusable part is the schema and template; the content is local to the page or entry using it.
+
+Use blocks when a group of fields also needs a reusable view, such as SEO metadata, cards, or calls to action that should render the same way across multiple pages. If the structure is only used on one page, a group (`{ ... }`) or repeating group (`[{ ... }]`) is usually simpler. Shared content like testimonials, authors, team members, categories, or reusable navigation data should generally be entries referenced with `entry(key)` or `[entry(key)]`, not blocks.
+
+Example block model:
+
+**`models/blocks/hero.model`**
+```
+{
+    heading: text,
+    subheading: paragraph,
+    background: image,
+    cta_label: text,
+    cta_link: link
+}
+```
+
+Use that block in a page model:
+
+**`models/pages/about.model`**
+```
+{
+    title: text,
+    hero: block(hero)
+}
+```
+
+Store that page's block data inline:
+
+**`content/pages/about.json`**
+```json
+{
+    "title": "About us",
+    "hero": {
+        "heading": "Care that feels personal",
+        "subheading": "A small team focused on long-term relationships.",
+        "background": "pexels:doctor",
+        "cta_label": "Book a visit",
+        "cta_link": "/contact"
+    }
+}
+```
+
+Render it from the page template with `render()`. The `block(hero)` declaration tells the renderer to use `blocks/hero.ejs`:
+
+**`pages/about.ejs`**
+```ejs
+<h1><%= item.title %></h1>
+<%- render(item.hero) %>
+```
+
+**`blocks/hero.ejs`**
+```ejs
+<section class="hero" style="background-image: url('<%- src(item.background, '1600x700') %>')">
+  <h2><%= item.heading %></h2>
+  <p><%= item.subheading %></p>
+  <a href="<%= item.cta_link %>"><%= item.cta_label %></a>
+</section>
+```
+
+Block models cannot contain other blocks. Use groups (`{ ... }`) or collections (`[{ ... }]`) inside a block when you need nested structure, and use `entry(key)` when a block needs shared reusable data.
+
+Repeatable blocks use the same collection syntax as groups and entries: `[block(cta)]`. Use this sparingly, only when each repeated item should use the same reusable block template. For simple one-page repeated content, prefer a repeating group (`[{ ... }]`). For reusable content selected across pages, prefer a collection entry plus `[entry(key)]`.
 
 **Entry reference** — Use `entry(key)` for one, `[entry(key)]` for many:
 ```
 {
-    author: entry(authors),
-    tags: [entry(tags)]
+    author: entry(authors+),
+    testimonials: [entry(testimonials+)],
+    tags: [entry(tags+)]
 }
 ```
 
@@ -138,8 +213,9 @@ Model fields declare both the editor type and the shape expected in content JSON
 | `video` | `{ "url": "...", "embed": "..." }` |
 | `json` | Object or array |
 | `sheet` | Array of arrays |
-| `location` | `{ "latitude": n, "longitude": n }` |
-| `block(key)` | Object matching that block's model (embedded, not a reference) |
+| `location` | `{ "markers": [{ "lat": n, "lng": n }], "img": "..." }`; `img` is a Google Maps Static Image string and can include any supported static image parameters |
+| `block(key)` | Object matching that block's model; stored inline in the parent page/entry content and rendered with `blocks/<key>.ejs` |
+| `[block(key)]` | Array of block objects; each item matches the block model and renders with `blocks/<key>.ejs` |
 | `entry(key)` / `[entry(key)]` | Slug string / array of slug strings in content JSON; entry object / array of entry objects in templates |
 | Group `{ ... }` | Nested object |
 | Collection `[{ ... }]` | Array of nested objects |
@@ -152,7 +228,7 @@ Model fields declare both the editor type and the shape expected in content JSON
 
 Content files are JSON records under `/content/` that hold the actual values for the fields declared in each `.model`. Editing a content file and saving it triggers the same sync-build-deploy loop as editing a template — you can view and edit content directly from this workspace.
 
-**Blocks have no top-level content files.** Block data is embedded inside the page or entry that references the block.
+**Blocks never have top-level content files.** Block data is always embedded inside the page or entry that declares the block field.
 
 ### File layout
 
@@ -168,7 +244,7 @@ Content files are JSON records under `/content/` that hold the actual values for
 Given a model:
 
 ```
-{ title: text, image: image, hero: block(hero), tags: [entry(tags)] }
+{ title: text, image: image, hero: block(hero), tags: [entry(tags+)] }
 ```
 
 The content file at `content/pages/about.json`:
@@ -177,12 +253,18 @@ The content file at `content/pages/about.json`:
 {
     "title": "About us",
     "image": "pexels:team meeting",
-    "hero": { "heading": "Hello", "subheading": "Welcome" },
+    "hero": {
+        "heading": "Hello",
+        "subheading": "Welcome",
+        "background": "pexels:doctor",
+        "cta_label": "Contact us",
+        "cta_link": "/contact"
+    },
     "tags": ["engineering", "design"]
 }
 ```
 
-Here `image` uses the shortcut form — on save, the sync engine replaces it with a real image object (`{ "url": "...", "alt": "..." }`). Write the object form directly when you have a specific asset URL.
+Here `hero` is embedded block data stored directly in the page content file. `image` and `hero.background` use the shortcut form — on save, the sync engine replaces each shortcut with a real image object (`{ "url": "...", "alt": "..." }`). Write the object form directly when you have a specific asset URL.
 
 ### Reusable images (`/images.json`)
 
@@ -435,13 +517,15 @@ Given a model:
 ```
 {
     hero: block(hero),
-    team: [entry(people)]
+    ctas: [block(cta)],
+    team: [entry(people+)]
 }
 ```
 
 Template:
 ```ejs
 <%- render(item.hero) %>
+<%- render(item.ctas) %>
 
 <% for (const person of item.team) { %>
   <%- render(person) %>
@@ -456,11 +540,16 @@ Template:
 2. Exception: `/css/tailwind.css` is auto-injected — do **not** add it via `link()`.
 3. `richtext` returns **HTML** — use `<%- %>` (unescaped) to output it. `markdown` returns **raw markdown** — convert with `marked()` first: `<%- marked(item.content) %>`.
 4. Use modern design with tailwind unless design details are specified.
-5. To change what appears on a page or in shared data, edit the matching JSON under `/content/` — do **not** hard-code content into `.ejs` templates. Templates define structure; content files hold the values.
-6. Fields in a content JSON file must match the keys defined in the corresponding `.model`. Adding a new field requires updating the `.model` first.
-7. Collection page items each live in their own file under `content/pages/<key>/<slug>.json` — the collection key already includes `+` (e.g., `content/pages/blog+/my-post.json`). The `<slug>` filename is the URL segment; renaming the file renames the URL.
-8. **Collection key suffix `+` is mandatory and must appear on every related file.** For a collection model (pages or entries — e.g., `blog`, `testimonials`, `authors`), the key `<name>+` is part of the filename on the model, template, **and** content JSON: `models/entries/testimonials+.model`, `entries/testimonials+.ejs`, `content/entries/testimonials+.json` (array). Same rule for collection pages: `models/pages/blog+.model`, `pages/blog+.ejs`, and one file per slug under `content/pages/blog+/<slug>.json`. Never drop the `+` — files without it are treated as singles and will not resolve.
-9. For `image` fields in content JSON, prefer the shortcut form `"<source>:<search>"` (sources: `unsplash`, `pexels`, `pixabay`, `iconify`) — e.g., `"pexels:doctor"`. Add alt text by appending `|<alt>` to the shortcut: `"pexels:doctor|Smiling doctor with stethoscope"`. The sync engine resolves it to a full `{ url, alt }` object on save. When the same image is reused across pages (logos, shared icons, recurring art), declare it once in `/images.json` and reference it via `"cms:<handle>"`.
-12. Inside `markdown` fields, embed images with `![alt](<source>:<search>)` — same sources as image fields. Append `|<alt>` to store alt on the image record (e.g. `![doctor](pexels:doctor|Friendly family doctor)`). Including a `<W>x<H>` token in the description (e.g. `|hero shot 1200x600`) sets the rendered URL's `w` and `h` query params; otherwise the default is `600x400`. On save, refs are rewritten to actual CDN URLs and the underlying image record is created automatically.
-10. Always create RSS feed for blogs and link them in meta so it is discoverable. Use "rss.xml" as the key.
-11. Make the sites extremely SEO friendly and sharing friendly
+5. If sync, build, render, image resolution, or deploy behavior fails, check `sync-errors.log` in the workspace root before guessing.
+6. To change what appears on a page or in shared data, edit the matching JSON under `/content/` — do **not** hard-code content into `.ejs` templates. Templates define structure; content files hold the values.
+7. Fields in a content JSON file must match the keys defined in the corresponding `.model`. Adding a new field requires updating the `.model` first.
+8. Collection page items each live in their own file under `content/pages/<key>/<slug>.json` — the collection key already includes `+` (e.g., `content/pages/blog+/my-post.json`). The `<slug>` filename is the URL segment; renaming the file renames the URL.
+9. **Collection key suffix `+` is mandatory and must appear on every related file.** For a collection model (pages or entries — e.g., `blog`, `testimonials`, `authors`), the key `<name>+` is part of the filename on the model, template, **and** content JSON: `models/entries/testimonials+.model`, `entries/testimonials+.ejs`, `content/entries/testimonials+.json` (array). Same rule for collection pages: `models/pages/blog+.model`, `pages/blog+.ejs`, and one file per slug under `content/pages/blog+/<slug>.json`. Never drop the `+` — files without it are treated as singles and will not resolve.
+10. Blocks are reusable component schemas/templates only. Never create `content/blocks/...`; store block values inline in the page or entry JSON that declares `block(key)` or `[block(key)]`.
+11. Use blocks only when a group of fields also benefits from a reusable template. For one-off page-only structure, prefer groups (`{ ... }`) or repeating groups (`[{ ... }]`).
+12. Use entries, not blocks, for shared reusable content such as testimonials, authors, people, categories, tags, navigation, or footer data.
+13. Block models cannot contain `block(...)` fields. Use groups, collections, or `entry(key)` references instead.
+14. For `image` fields in content JSON, prefer the shortcut form `"<source>:<search>"` (sources: `unsplash`, `pexels`, `pixabay`, `iconify`) — e.g., `"pexels:doctor"`. Add alt text by appending `|<alt>` to the shortcut: `"pexels:doctor|Smiling doctor with stethoscope"`. The sync engine resolves it to a full `{ url, alt }` object on save. When the same image is reused across pages (logos, shared icons, recurring art), declare it once in `/images.json` and reference it via `"cms:<handle>"`.
+15. Inside `markdown` fields, embed images with `![alt](<source>:<search>)` — same sources as image fields. Append `|<alt>` to store alt on the image record (e.g. `![doctor](pexels:doctor|Friendly family doctor)`). Including a `<W>x<H>` token in the description (e.g. `|hero shot 1200x600`) sets the rendered URL's `w` and `h` query params; otherwise the default is `600x400`. On save, refs are rewritten to actual CDN URLs and the underlying image record is created automatically.
+16. Always create RSS feed for blogs and link them in meta so it is discoverable. Use "rss.xml" as the key.
+17. Make the sites extremely SEO friendly and sharing friendly.
