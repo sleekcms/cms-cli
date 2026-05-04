@@ -213,7 +213,7 @@ Model fields declare both the editor type and the shape expected in content JSON
 | `video` | `{ "url": "...", "embed": "..." }` |
 | `json` | Object or array |
 | `sheet` | Array of arrays |
-| `location` | `{ "markers": [{ "lat": n, "lng": n }], "img": "..." }`; `img` is a Google Maps Static Image string and can include any supported static image parameters |
+| `location` | `{ "markers": [{ "lat": n, "lng": n }], "img": "..." }`; `img` is a Google Maps Static Image URL that already includes the markers and can include formatting parameters such as `size`, `zoom`, `scale`, `maptype`, and styling |
 | `block(key)` | Object matching that block's model; stored inline in the parent page/entry content and rendered with `blocks/<key>.ejs` |
 | `[block(key)]` | Array of block objects; each item matches the block model and renders with `blocks/<key>.ejs` |
 | `entry(key)` / `[entry(key)]` | Slug string / array of slug strings in content JSON; entry object / array of entry objects in templates |
