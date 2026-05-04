@@ -1,200 +1,146 @@
 # SleekCMS — Site Builder Reference
 
-Cloud-based headless CMS with an integrated static site builder. Files sync automatically — every save triggers a rebuild and deploy. No Git, no servers, no manual builds.
+Cloud headless CMS with an integrated static site builder. Save any file → site rebuilds and redeploys.
 
 ---
 
-## How It Works
+## How a site is assembled
 
-Each page = **model** (schema) + **template** (EJS) + optional **layout** (EJS wrapper).
+A site is a set of **pages**. Each page is built by combining:
 
-The **file name** (key) links a model to its template and determines the URL path.
+1. A **layout** — the outer HTML shell (`<html>`, header, footer). The page renders into its `main` slot.
+2. A **page** — content unique to one URL.
+3. **Entries** — reusable standalone records (e.g. `header`, `footer`, `authors`). Pages pull them in by handle or via reference field type.
+4. **Blocks** — reusable field groups *embedded inside* a page or entry (e.g. `seo`, `contact`).
+
+A model defines the shape of the content. A view is the html template (EJS). A view combines with content to create a rendered html for a page.
+
+| Layer | Path | What it holds |
+|---|---|---|
+| model | `models/<type>/<key>.model` | the shape (fields and types) |
+| content | `content/<type>/<key>.json` | the values |
+| view | `<type>/<key>.ejs` | the EJS template |
+
+Where `<type>` is `pages`, `entries`, or `blocks`, and `<key>` is shared across the three files. The path skeleton `<kind>/<type>/<key>` is the whole filesystem convention.
+
+> **Blocks** are special: they have no `content/blocks/...` file. A block's values live inside whatever page or entry embeds it. Models and views still live at the usual paths.
 
 ---
 
-## File Naming Convention
+## Keys and collections
 
-Keys are lowercase, dash-separated. For pages, `_` in the key maps to `/` in the URL. A `[]` suffix marks a collection.
+The key uniquely connects the model with its content and view template (EJS). The key prefix denotes of the content is a collection or record objects or directly the one record object.
 
-| File key | URL |
+- **Entry key** = the handle. e.g. `header`, `authors`.
+- **Page key** = URL path with `/` replaced by `_`. e.g. `/` → `_index`, `/about` → `about`, `/docs/getting-started` → `docs_getting-started`.
+- **Append `[]`** to make a collection (many records). Without `[]` the key is a single record. The `[]` is part of the key — it must appear on **every** related file.
+
+| Key | Meaning |
 |---|---|
-| `_index` | `/` (home) |
-| `about` | `/about` |
-| `blog[]` | `/blog/<slug>` (one page per entry) |
-| `docs_getting-started` | `/docs/getting-started` |
+| `about` | single page at `/about` |
+| `blog` | single page at `/blog` (e.g. an index that lists posts) |
+| `blog[]` | collection — one page per item at `/blog/<slug>` |
+| `header` | single entry |
+| `authors[]` | collection of entry records |
 
-The keys for model, template, and content file are the same — if the model is a **collection**, the `[]` suffix is part of the key and must appear on **every** related file.
-
-Examples:
-- Collection page `blog`: `models/pages/blog[].model`, `pages/blog[].ejs`, `content/pages/blog[]/<slug>.json`
-- Collection entry `testimonials`: `models/entries/testimonials[].model`, `entries/testimonials[].ejs`, `content/entries/testimonials[].json`
-- Single page `about`: `models/pages/about.model`, `pages/about.ejs`, `content/pages/about.json` (no `[]`)
+For collection **content**:
+- pages → `content/pages/<key>[]/<slug>.json` (one file per item; filename is the slug)
+- entries → `content/entries/<key>[].json` (one file, an array of objects)
 
 ---
 
-## Folder Structure
+## Other top-level paths
 
 ```
-/models/pages/<key>.model      Page content models
-/models/entries/<key>.model    Entry content models
-/models/blocks/<key>.model     Block content models
-
-/pages/<key>.ejs               Page templates
-/entries/<key>.ejs             Entry templates
-/blocks/<key>.ejs              Block templates
-/layouts/<name>.ejs            Layout wrappers
-
-/css/<name>.css                Stylesheets (require head injection)
-/css/tailwind.css              Tailwind CSS (auto-compiled, auto-injected)
-/js/<name>.js                  Scripts (require head injection)
-
-/content/pages/<key>.json          Content for a single (non-list) page
-/content/pages/<key>/<slug>.json   Content for one item of a collection page (<key> ends with [])
-/content/entries/<key>.json        Content for a single entry (object)
-/content/entries/<key>[].json      Content for a collection entry (array of objects; <key>[] matches the model filename)
-
-/images.json                       Site-level reusable images (handle → shortcut)
+layouts/<name>.ejs    Layout wrappers
+css/<name>.css        Stylesheets (include via link())
+css/tailwind.css      Auto-compiled, auto-injected — do NOT link()
+js/<name>.js          Scripts (include via script())
+images.json           Site-level reusable images (handle → shortcut)
 ```
-
-> **Tailwind**: Creating `/css/tailwind.css` enables Tailwind. It is compiled and injected automatically — do NOT add it via `link()`.
-> All other CSS/JS files must be included via `link()` or `script()`.
 
 ---
 
-## Content Models
+## Rendering
 
-### Model Types
+- A **page** is rendered into the variable `main`. The layout outputs it with `<%- main %>`.
+- An **entry** or **block** is rendered with `render(obj)`.
 
-| Type | Purpose | Has URL | File path |
-|---|---|---|---|
-| **Page** | Routable content | Yes | `models/pages/<key>.model` |
-| **Entry** | Shared/reusable data (nav, footer, authors) | No | `models/entries/<key>.model` |
-| **Block** | Reusable field group embedded in pages/entries | No | `models/blocks/<key>.model` |
+---
 
-All three can be **single** (one record) or **collection** (many records, key ends with `[]`).
+## Models — field shapes
 
-### .model File Format
-
-JSON structure without quotes on keys or string values. Scalar values are the field type name.
+A `.model` file is JSON-shaped *without quotes*. Scalar values are field type names.
 
 ```
-{
-    title: text,
-    image: image,
-    content: markdown
-}
+{ title: text, image: image, content: markdown }
 ```
 
-**Groups** — Nest fields in an object:
-```
-{
-    hero: {
-        heading: text,
-        background: image
-    }
-}
-```
+- **Many of a type** — wrap in `[]`: `images: [image]`
+- **Grouped fields** — nest in `{}`: `hero: { heading: text, background: image }`
+- **Repeatable group** — wrap a group in `[]`: `features: [{ title: text, icon: image }]`
+- **Block reference** (values embedded): `cta: block(cta)`
+- **Entry reference** (by handle): `author: entry(authors)` or `tags: [entry(tags)]`
 
-**Collections** (repeatable lists) — Wrap a group in `[]`:
-```
-{
-    features: [
-        {
-            title: text,
-            icon: image
-        }
-    ]
-}
-```
+### Scalar types
 
-**Block reference** — Use `block(key)`:
-```
-{
-    cta: block(cta)
-}
-```
-
-**Entry reference** — Use `entry(key)` for one, `[entry(key)]` for many:
-```
-{
-    author: entry(authors),
-    tags: [entry(tags)]
-}
-```
-
-### Field Types
-
-| Type | Returns |
+| Type | Value |
 |---|---|
-| `text` | String |
-| `paragraph` | String (multiline) |
+| `text`, `paragraph` | String |
 | `richtext` | HTML string |
-| `markdown` | Markdown string (use `marked()` to convert to HTML). Inside markdown, use the same image shortcut convention inside standard image syntax: `![alt](pexels:doctor)`. To set the image's alt, append `\|<alt>` — and any `<width>x<height>` pattern in the description sets the URL's `w`/`h` (defaults to `600x400`). E.g. `![doctor](pexels:doctor\|Smiling doctor 800x600)`. |
-| `number` | Number |
-| `boolean` | `true` / `false` |
-| `date` | `YYYY-MM-DD` |
-| `datetime` | ISO 8601 string |
-| `time` | `HH:mm` |
-| `color` | String (hex or name) |
-| `link` | URL string or relative path |
+| `markdown` | Markdown string (render with `marked()`) |
+| `number`, `boolean` | self |
+| `date`, `datetime`, `time` | string (`YYYY-MM-DD`, ISO 8601, `HH:mm`) |
+| `color`, `link`, `code` | String |
 | `image` | `{ url, alt }` |
 | `video` | `{ url, embed }` |
-| `code` | String |
 | `json` | Object or array |
 | `sheet` | Array of arrays |
 | `location` | `{ latitude, longitude }` |
-| `block(key)` | Block object |
-| `entry(key)` | Entry object(s) |
 
 ---
 
-## Content Records
+## Content — JSON values
 
-Content files are JSON records under `/content/` that hold the actual values for the fields declared in each `.model`. Editing a content file and saving it triggers the same sync-build-deploy loop as editing a template — you can view and edit content directly from this workspace.
+Content JSON mirrors the model: scalars become strings/numbers, groups become objects, repeatable types become arrays. `block(k)` is an embedded object; `entry(k)` is a slug string (or array of slug strings).
 
-**Blocks have no top-level content files.** Block data is embedded inside the page or entry that references the block.
+### Image shortcuts
 
-### File layout
+For `image` fields, prefer a shortcut over a full object — the sync engine resolves it to `{ url, alt }` on save.
 
-| Model shape | File path | JSON top-level |
-|---|---|---|
-| Single page (e.g., `about`) | `content/pages/about.json` | Object |
-| Collection page (e.g., `blog[]`) | `content/pages/blog[]/<slug>.json` (the `[]` is part of the key, not an extra suffix) | Object; one file per slug |
-| Single entry (e.g., `header`) | `content/entries/header.json` | Object |
-| Collection entry (e.g., `authors`) | `content/entries/authors[].json` (the `[]` is part of the key — same as the model filename) | Array of objects |
+```
+"image": "pexels:doctor"
+"image": "url:https://picsum.photos/200.jpg"
+"image": "cms:logo"
+```
 
-### Field serialization
+Sources: `unsplash`, `pexels`, `pixabay`, `iconify`, `url`, `cms`. Append `|<alt>` to set alt: `"pexels:doctor|Smiling doctor"`.
 
-How values in content JSON map to the types declared in the model:
+### Reusable images (`images.json`)
 
-| Model type | JSON value |
-|---|---|
-| `text`, `paragraph`, `richtext`, `markdown`, `code`, `color`, `link` | String |
-| `number` | Number |
-| `boolean` | `true` / `false` |
-| `date` | `"YYYY-MM-DD"` string |
-| `datetime` | ISO 8601 string |
-| `time` | `"HH:mm"` string |
-| `image` | Either a resolved `{ "url": "...", "alt": "..." }` object, **or** a shortcut string `"<source>:<search>"` (e.g., `"pexels:doctor"`, `"url:https://picsum.photos/200.jpg"`, `"cms:logo"`). Supported sources: `unsplash`, `pexels`, `pixabay`, `iconify`, `url`, `cms` (reuses an image declared in `/images.json` by handle). Append `\|<alt text>` to set the image's alt, e.g. `"pexels:doctor\|Smiling doctor with stethoscope"`. On save, the sync engine resolves the shortcut/link to a full image object automatically. |
-| `video` | `{ "url": "...", "embed": "..." }` |
-| `json` | Object or array |
-| `sheet` | Array of arrays |
-| `location` | `{ "latitude": n, "longitude": n }` |
-| `block(key)` | Object matching that block's model (embedded, not a reference) |
-| `entry(key)` / `[entry(key)]` | Slug string / array of slug strings referencing entries by handle |
-| Group `{ ... }` | Nested object |
-| Collection `[{ ... }]` | Array of nested objects |
+Declare once, reference everywhere:
+
+```json
+{
+    "logo": "url:https://cdn.example.com/logo.svg",
+    "hero": "pexels:mountain sunrise"
+}
+```
+
+Reference from any `image` field with `"cms:<handle>"`, or fetch from a template with `getImage('<handle>')`.
+
+### Markdown images
+
+Inside `markdown` fields, embed images with the same shortcut: `![alt](pexels:doctor)`. Append `|<alt>` for alt text and `<W>x<H>` to size: `![doctor](pexels:doctor|Friendly doctor 800x600)` (default `600x400`).
 
 ### Example
 
-Given a model:
-
+Model:
 ```
 { title: text, image: image, hero: block(hero), tags: [entry(tags)] }
 ```
 
-The content file at `content/pages/about.json`:
-
+`content/pages/about.json`:
 ```json
 {
     "title": "About us",
@@ -204,163 +150,144 @@ The content file at `content/pages/about.json`:
 }
 ```
 
-Here `image` uses the shortcut form — on save, the sync engine replaces it with a real image object (`{ "url": "...", "alt": "..." }`). Write the object form directly when you have a specific asset URL.
-
-### Reusable images (`/images.json`)
-
-For images used in more than one place (logos, recurring icons, hero art), declare them once in `/images.json` as a flat map of `handle → shortcut` using the same shortcut convention as `image` fields:
-
-```json
-{
-    "logo": "url:https://cdn.example.com/logo.svg",
-    "hero": "pexels:mountain sunrise",
-    "apple-icon": "iconify:mdi:apple"
-}
-```
-
-Then reference any of them from any content `image` field with `"cms:<handle>"` (e.g., `"cms:logo"`). The sync engine resolves it to the full image object on save. Templates can also fetch the resolved object directly via `getImage('<handle>')`.
-
 ---
 
-## EJS Templates
-
-### Syntax
+## Views — EJS templates
 
 | Tag | Purpose |
 |---|---|
-| `<%= expr %>` | Output with HTML escaping (text content) |
-| `<%- expr %>` | Output raw HTML (blocks, images, rich text, helpers) |
-| `<% code %>` | Execute JS (loops, conditionals, variables) |
+| `<%= expr %>` | Output, HTML-escaped |
+| `<%- expr %>` | Output raw HTML (blocks, images, helpers) |
+| `<% code %>` | Execute JS |
 
-### Template Context
+### Variables in scope
 
-Every template receives these variables:
+- `item` — the record being rendered (page, entry, or block).
+- `pages` — all page records.
+- `entries` — all entries keyed by handle.
+- `main` — rendered page output (layouts only).
 
-| Variable | Type | Description |
-|---|---|---|
-| `item` | Object | Current page, block, or entry being rendered |
-| `pages` | Array | All page records (each has `_path`, `_slug`, fields) |
-| `entries` | Object | All entries keyed by model handle |
-| `main` | String | Rendered page template output (**layout only**) |
+Page records also have `_path`, `_slug` (collections), and `_meta.updated_at`.
 
-`item` always refers to the current record. In a page template, `item` is the page. In a block template, `item` is the block instance. In an entry template, `item` is the entry.
+### Helper functions
 
-Page records include: `item._path`, `item._slug` (collections), `item._meta.updated_at`.
+**Content access**
+
+```
+getPage(path)               page by exact path
+getPages(path, opts?)       pages with prefix; { collection: true } for collection items only
+getEntry(handle)            entry by handle (object for single, array for collection)
+getSlugs(path)              slugs under a collection path
+getImage(name)              site-level image
+getOptions(name)            option set as [{ label, value }]
+getContent(query?)          full content payload, optional JMESPath
+path(page)                  URL path of a page
+url(pathOrPage?)            site origin or full URL
+```
+
+**Rendering**
+
+```
+render(val, separator?)     render a block/entry (or array) through its view
+marked(md)                  markdown → HTML
+```
+
+**Images** — `attr` is `"WxH"` or `{ w, h, size, fit, type, class, style }`
+
+```
+src(image, attr)            optimized URL
+img(image, attr)            <img>
+picture(image, attr)        <picture> with dark/light variants
+svg(image, attr?)           inline SVG
+```
+
+**Head injection** — call from any template, deduplicated automatically
+
+```
+title(text)
+meta(attrs)
+link(value, order?)         <link> (string URL auto-detects type)
+style(css, order?)          <style>
+script(value, order?)       <script> (.js URL → external, else inline)
+```
 
 ---
 
-## Helper Functions
+## Recipes
 
-### Content Access
+### Layout
 
-| Function | Returns | Description |
-|---|---|---|
-| `getPage(path)` | Object \| undefined | Page by exact path |
-| `getPages(path, opts?)` | Array | Pages where path starts with prefix. `{ collection: true }` for collection pages only |
-| `getEntry(handle)` | Object \| Array | Entry by handle. Single → object, collection → array |
-| `getSlugs(path)` | string[] | Slugs under a collection path |
-| `getImage(name)` | Object \| undefined | Site-level image by handle |
-| `getOptions(name)` | Array \| undefined | Option set as `[{ label, value }]` |
-| `getContent(query?)` | Any | Full content payload, or filter with JMESPath |
-| `path(page)` | String | URL path of a page object |
-| `url(pathOrPage?)` | String | Site origin (e.g. `https://example.com`). Pass a path string to get a full URL (`url('/blog')` → `https://example.com/blog`), or pass a page object to resolve its path into a full URL. |
-
-### Rendering
-
-| Function | Returns | Description |
-|---|---|---|
-| `render(val, separator?)` | HTML string | Render a block/entry (or array of them) through its template |
-| `marked(md)` | HTML string | Convert a markdown string to HTML |
-
-### Images
-
-| Function | Returns | Description |
-|---|---|---|
-| `src(image, attr)` | URL string | Optimized image URL |
-| `img(image, attr)` | HTML string | `<img>` element |
-| `picture(image, attr)` | HTML string | `<picture>` with dark/light variants |
-| `svg(image, attr?)` | HTML string | Inline SVG with optional attributes |
-
-`attr` can be `"WxH"` string or `{ w, h, size, fit, type, class, style }` object.
-
-### Head Injection
-
-Call from **any template** (page, block, entry, or layout). Deduplicated automatically.
-
-| Function | Description |
-|---|---|
-| `title(text)` | Set page `<title>` |
-| `meta(attrs)` | Add `<meta>` tag |
-| `link(value, order?)` | Add `<link>` tag (string URL auto-detects type, or pass object) |
-| `style(css, order?)` | Add `<style>` block |
-| `script(value, order?)` | Add `<script>` (`.js` URL → external, otherwise inline) |
-
----
-
-## SEO
-
-Create a **block model** (e.g., `seo.model`) and add SEO tags manually in its template:
-
-**`models/blocks/seo.model`**
-```
-{
-    title: text,
-    description: paragraph,
-    image: image
-}
-```
-
-**`blocks/seo.ejs`**
 ```ejs
-<% if (item.title) title(item.title) %>
-<% if (item.description) meta({ name: 'description', content: item.description }) %>
-<% if (item.image) { %>
-  <% meta({ property: 'og:image', content: src(item.image, '1200x630') }) %>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+  <header><%- render(getEntry('header')) %></header>
+  <main><%- main %></main>
+  <footer><%- render(getEntry('footer')) %></footer>
+</body>
+</html>
+```
+
+### Page
+
+```ejs
+<% title(item.title + ' | My Site') %>
+<% link('/css/styles.css') %>
+<% script('/js/app.js') %>
+
+<h1><%= item.title %></h1>
+<%- img(item.image, '1200x600') %>
+<div><%- item.content %></div>
+```
+
+### List a collection
+
+```ejs
+<% for (const post of getPages('/blog', { collection: true })) { %>
+  <a href="<%- path(post) %>">
+    <%- img(post.image, '400x250') %>
+    <h3><%= post.title %></h3>
+  </a>
 <% } %>
 ```
 
-Then include `seo: block(seo)` in any page model and render it: `<%- render(item.seo) %>`
+### Render blocks and entry references
 
----
+Model: `{ hero: block(hero), team: [entry(people)] }`
 
-## Forms
+```ejs
+<%- render(item.hero) %>
 
-Any `<form>` with a `data-sleekcms="<name>"` attribute works automatically — submissions are captured, stored, and viewable in the CMS dashboard. No backend setup, no action URL, no JS required.
-
-```html
-<form data-sleekcms="contact">
-  <input name="name" type="text" required>
-  <input name="email" type="email" required>
-  <textarea name="message"></textarea>
-  <button type="submit">Send</button>
-</form>
+<% for (const person of item.team) { %>
+  <%- render(person) %>
+<% } %>
 ```
 
-The `<name>` value (e.g., `contact`, `newsletter`, `quote-request`) groups submissions by form. Use standard `name` attributes on inputs — each field is stored as-is.
+### SEO
 
----
-
-## RSS Feeds
-
-Create an RSS feed by adding a page with the key `rss.xml` — this maps to the URL `/rss.xml`. Because the extension is `.xml`, the static server serves it with the correct content type automatically. The template outputs raw XML and must **not** use a layout.
-
-**`models/pages/rss.xml.model`**
+`models/blocks/seo.model`:
 ```
-{
-    title: text,
-    description: paragraph
-}
+{ title: text, description: paragraph, image: image }
 ```
 
-**`content/pages/rss.xml.json`**
-```json
-{
-    "title": "My Blog",
-    "description": "Latest posts from My Blog"
-}
+`blocks/seo.ejs`:
+```ejs
+<% if (item.title) title(item.title) %>
+<% if (item.description) meta({ name: 'description', content: item.description }) %>
+<% if (item.image) meta({ property: 'og:image', content: src(item.image, '1200x630') }) %>
 ```
 
-**`pages/rss.xml.ejs`**
+In a page model: `seo: block(seo)`. In its template: `<%- render(item.seo) %>`.
+
+### RSS feed
+
+Use the page key `rss.xml` — the `.xml` extension makes the static server set the right content type. Do **not** use a layout.
+
+`pages/rss.xml.ejs`:
 ```ejs
 <?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
@@ -381,109 +308,38 @@ Create an RSS feed by adding a page with the key `rss.xml` — this maps to the 
 </rss>
 ```
 
-Notes:
-- The key `rss.xml` follows the standard naming convention — the dot is part of the key as-is.
-- `getPages('/blog', { collection: true })` fetches all blog collection pages; adjust the path to match your collection key.
-- `url(post)` resolves the page object to a full absolute URL (e.g. `https://example.com/blog/my-post`) — no need to store the site URL in content.
-- `post._meta.updated_at` is an ISO 8601 timestamp; `.toUTCString()` converts it to RFC 822 format required by RSS.
-- Use a dedicated `description` or `summary` field in your blog model for feed excerpts; fall back to any short-text field if one doesn't exist.
-- To autodiscover the feed, add `<% link({ rel: 'alternate', type: 'application/rss+xml', title: 'RSS', href: '/rss.xml' }) %>` in your layout or page templates.
-
----
-
-## Examples
-
-### Layout
-
+For autodiscovery, add to the layout:
 ```ejs
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body>
-  <% const header = getEntry('header'); %>
-  <header>
-    <%- render(header) %>
-  </header>
-
-  <main><%- main %></main>
-
-  <% const footer = getEntry('footer'); %>
-  <footer>
-    <%- render(footer) %>
-  </footer>
-</body>
-</html>
+<% link({ rel: 'alternate', type: 'application/rss+xml', title: 'RSS', href: '/rss.xml' }) %>
 ```
 
-### Page template
+### Forms
 
-```ejs
-<% title(item.title + ' | My Site') %>
-<% link('/css/styles.css') %>
-<% script('/js/app.js') %>
+Any `<form>` with `data-sleekcms="<name>"` is captured automatically — submissions are stored and viewable in the dashboard.
 
-<h1><%= item.title %></h1>
-<%- img(item.image, '1200x600') %>
-<div><%- item.content %></div>
+```html
+<form data-sleekcms="contact">
+  <input name="name" type="text" required>
+  <input name="email" type="email" required>
+  <textarea name="message"></textarea>
+  <button type="submit">Send</button>
+</form>
 ```
 
-### Block template
-
-```ejs
-<section class="hero" style="background-image: url('<%- src(item.background, '1920x800') %>')">
-  <h2><%= item.heading %></h2>
-  <p><%= item.subheading %></p>
-  <a href="<%= item.cta_link %>" class="btn"><%= item.cta_label %></a>
-</section>
-```
-
-### List collection pages
-
-```ejs
-<% for (const post of getPages('/blog', { collection: true })) { %>
-  <a href="<%- path(post) %>">
-    <%- img(post.image, '400x250') %>
-    <h3><%= post.title %></h3>
-  </a>
-<% } %>
-```
-
-### Render blocks and entry references
-
-Given a model:
-```
-{
-    hero: block(hero),
-    team: [entry(people)]
-}
-```
-
-Template:
-```ejs
-<%- render(item.hero) %>
-
-<% for (const person of item.team) { %>
-  <%- render(person) %>
-<% } %>
-```
+Each input's `name` becomes a stored field.
 
 ---
 
 ## Rules for AI
 
-1. Include CSS/JS files via **`link()`** and **`script()`** — never raw `<link>` or `<script>` tags in templates.
+1. Include CSS/JS via `link()` and `script()` — never raw `<link>` or `<script>` tags.
 2. Exception: `/css/tailwind.css` is auto-injected — do **not** add it via `link()`.
-3. `richtext` returns **HTML** — use `<%- %>` (unescaped) to output it. `markdown` returns **raw markdown** — convert with `marked()` first: `<%- marked(item.content) %>`.
-4. Use modern design with tailwind unless design details are specified.
-5. To change what appears on a page or in shared data, edit the matching JSON under `/content/` — do **not** hard-code content into `.ejs` templates. Templates define structure; content files hold the values.
-6. Fields in a content JSON file must match the keys defined in the corresponding `.model`. Adding a new field requires updating the `.model` first.
-7. Collection page items each live in their own file under `content/pages/<key>/<slug>.json` — the collection key already includes `[]` (e.g., `content/pages/blog[]/my-post.json`). The `<slug>` filename is the URL segment; renaming the file renames the URL.
-8. **Collection key suffix `[]` is mandatory and must appear on every related file.** For a collection model (pages or entries — e.g., `blog`, `testimonials`, `authors`), the key `<name>[]` is part of the filename on the model, template, **and** content JSON: `models/entries/testimonials[].model`, `entries/testimonials[].ejs`, `content/entries/testimonials[].json` (array). Same rule for collection pages: `models/pages/blog[].model`, `pages/blog[].ejs`, and one file per slug under `content/pages/blog[]/<slug>.json`. Never drop the `[]` — files without it are treated as singles and will not resolve.
-9. For `image` fields in content JSON, prefer the shortcut form `"<source>:<search>"` (sources: `unsplash`, `pexels`, `pixabay`, `iconify`) — e.g., `"pexels:doctor"`. Add alt text by appending `|<alt>` to the shortcut: `"pexels:doctor|Smiling doctor with stethoscope"`. The sync engine resolves it to a full `{ url, alt }` object on save. When the same image is reused across pages (logos, shared icons, recurring art), declare it once in `/images.json` and reference it via `"cms:<handle>"`.
-12. Inside `markdown` fields, embed images with `![alt](<source>:<search>)` — same sources as image fields. Append `|<alt>` to store alt on the image record (e.g. `![doctor](pexels:doctor|Friendly family doctor)`). Including a `<W>x<H>` token in the description (e.g. `|hero shot 1200x600`) sets the rendered URL's `w` and `h` query params; otherwise the default is `600x400`. On save, refs are rewritten to actual CDN URLs and the underlying image record is created automatically.
-10. Always create RSS feed for blogs and link them in meta so it is discoverable. Use "rss.xml" as the key.
-11. Make the sites extremely SEO friendly and sharing friendly
-
+3. `richtext` is HTML (use `<%- %>`); `markdown` is raw markdown (convert with `marked()` first).
+4. Use modern Tailwind design unless told otherwise.
+5. Edit JSON under `content/` to change content — never hard-code values into `.ejs`.
+6. Adding a field requires updating the `.model` first; content keys must match model keys.
+7. The `[]` suffix is part of the key and must appear on **every** related file (model, view, content). Without it the file is treated as a single.
+8. For `image` fields, prefer the shortcut form `"<source>:<search>"`. Reuse images via `images.json` and `"cms:<handle>"`.
+9. Inside markdown, embed images with `![alt](<source>:<search>|<alt> <W>x<H>)` (default `600x400`).
+10. Always create an RSS feed for blogs (key `rss.xml`) and link it from the layout.
+11. Make sites SEO- and sharing-friendly.
