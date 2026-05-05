@@ -15,7 +15,7 @@ const cli = require("./src/cli");
 const watcher = require("./src/watcher");
 const { syncSite } = require("./setup-site");
 
-const agentMdContent = fs.readFileSync(path.join(__dirname, "Agent.md"), "utf-8");
+const agentMdContent = fs.readFileSync(path.join(__dirname, "AGENT.md"), "utf-8");
 
 const options = cli.parseArgs();
 
